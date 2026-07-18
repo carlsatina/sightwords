@@ -98,6 +98,13 @@ export interface Settings {
   speechRate: number
   speechVoiceURI: string | null
   confettiEnabled: boolean
+  /**
+   * Show the Hear it and previous/next buttons in big word mode. Off by
+   * default: tapping and swiping already do both jobs, and the point of the
+   * mode is that nothing shares the screen with the word. The close button is
+   * always shown regardless — without it a touch device has no way out.
+   */
+  showFocusControls: boolean
   reduceMotion: boolean
   /** Levels the child is allowed to open from the home screen. */
   unlockedLevels: LevelId[]

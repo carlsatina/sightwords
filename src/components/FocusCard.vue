@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useSwipe } from '@/composables/useSwipe'
+import { useSettingsStore } from '@/stores/settings'
 import type { AccentName } from '@/types'
 
 /**
@@ -33,9 +34,25 @@ const emit = defineEmits<{
   speak: []
 }>()
 
+const settings = useSettingsStore()
+
 const container = ref<HTMLElement | null>(null)
 /** The tap hint earns its place only until the parent has tapped once. */
 const hintVisible = ref(true)
+
+const controlsVisible = computed(() => settings.settings.showFocusControls)
+
+/**
+ * When the controls are turned off they stay in the DOM but become invisible
+ * and untappable — a hidden button that still accepts a tap would fire on a
+ * stray touch. Keyboard focus brings them back, because tabbing to a control
+ * you cannot see is the same trap in the other direction.
+ */
+const controlsClass = computed(() =>
+  controlsVisible.value
+    ? ''
+    : 'pointer-events-none opacity-0 focus-within:pointer-events-auto focus-within:opacity-100',
+)
 
 const { dragX, listeners } = useSwipe({
   onTap: () => {
@@ -146,7 +163,8 @@ watch(
 
     <!-- Bottom bar: real controls, so this works without gestures. -->
     <div
-      class="flex items-center justify-center gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+      class="flex items-center justify-center gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] transition-opacity duration-200"
+      :class="controlsClass"
     >
       <button
         v-if="navigable"
@@ -194,11 +212,14 @@ watch(
       <slot name="actions" />
     </div>
 
+    <!-- With the controls hidden, this hint is the only thing telling a parent
+         how the screen works, so it stays until the first tap. -->
     <p
       v-if="hintVisible"
       class="pb-6 text-center text-sm opacity-40 transition-opacity duration-500"
     >
       Tap the word to hear it{{ navigable ? ' · swipe to move between words' : '' }}
     </p>
+    <div v-else class="pb-6" aria-hidden="true" />
   </div>
 </template>

@@ -138,8 +138,9 @@ describe('focus mode', () => {
     expect(wrapper.find('[role="dialog"]').text()).toContain(words[0].text)
   })
 
-  it('offers buttons as well as gestures', async () => {
-    // Swiping is unavailable on a keyboard, so the same jobs need real controls.
+  it('keeps navigation buttons in the page for keyboard users', async () => {
+    // Swiping is unavailable on a keyboard, so the same jobs need real controls
+    // even when they are visually hidden.
     const wrapper = await mountFlashcards()
     const dialog = await openFocus(wrapper)
     const words = useWordsStore().getLevel(1)!.words
@@ -150,6 +151,57 @@ describe('focus mode', () => {
     await dialog.find('[aria-label="Next word"]').trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[role="dialog"]').text()).toContain(words[1].text)
+  })
+})
+
+describe('focus mode controls', () => {
+  function controlBar(wrapper: ReturnType<typeof mount>) {
+    return wrapper.find('[aria-label="Next word"]').element.parentElement!
+  }
+
+  it('hides the controls by default', async () => {
+    const wrapper = await mountFlashcards()
+    await openFocus(wrapper)
+
+    const classes = controlBar(wrapper).className
+    expect(classes).toContain('opacity-0')
+    // Invisible buttons must not swallow a stray tap meant for the word.
+    expect(classes).toContain('pointer-events-none')
+  })
+
+  it('still shows the close button, so touch users are never trapped', async () => {
+    const wrapper = await mountFlashcards()
+    const dialog = await openFocus(wrapper)
+
+    const close = dialog.find('[aria-label="Leave focus mode"]')
+    expect(close.exists()).toBe(true)
+    // The close button sits outside the hideable control bar.
+    expect(close.element.parentElement!.className).not.toContain('opacity-0')
+
+    await close.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+
+  it('reveals the controls when a parent turns them on', async () => {
+    const { useSettingsStore } = await import('@/stores/settings')
+    useSettingsStore().update('showFocusControls', true)
+
+    const wrapper = await mountFlashcards()
+    await openFocus(wrapper)
+
+    const classes = controlBar(wrapper).className
+    expect(classes).not.toContain('opacity-0')
+    expect(classes).not.toContain('pointer-events-none')
+  })
+
+  it('brings hidden controls back on keyboard focus', async () => {
+    const wrapper = await mountFlashcards()
+    await openFocus(wrapper)
+
+    const classes = controlBar(wrapper).className
+    expect(classes).toContain('focus-within:opacity-100')
+    expect(classes).toContain('focus-within:pointer-events-auto')
   })
 
   it('closes when Escape is pressed', async () => {

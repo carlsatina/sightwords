@@ -321,6 +321,27 @@ function chooseVoice(voiceURI: string) {
         <input
           type="checkbox"
           class="h-6 w-6 accent-[var(--color-grape)]"
+          :checked="settings.settings.showFocusControls"
+          @change="
+            settings.update(
+              'showFocusControls',
+              ($event.target as HTMLInputElement).checked,
+            )
+          "
+        />
+        <span>
+          <span class="block font-bold">Show buttons in big word mode</span>
+          <span class="block text-xs opacity-55">
+            Off by default — tap the word to hear it, swipe to move between words.
+            The close button always stays.
+          </span>
+        </span>
+      </label>
+
+      <label class="mt-3 flex cursor-pointer items-center gap-3">
+        <input
+          type="checkbox"
+          class="h-6 w-6 accent-[var(--color-grape)]"
           :checked="settings.settings.reduceMotion"
           @change="
             settings.update('reduceMotion', ($event.target as HTMLInputElement).checked)

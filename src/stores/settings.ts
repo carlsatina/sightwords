@@ -12,6 +12,7 @@ function createDefaults(): Settings {
     speechRate: 0.85, // Slower than natural speech — this is a pronunciation model.
     speechVoiceURI: null,
     confettiEnabled: true,
+    showFocusControls: false, // Tap and swipe already cover these.
     reduceMotion: false,
     unlockedLevels: [1, 2, 3, 4, 5],
     dailyGoal: 10,
