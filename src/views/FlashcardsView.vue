@@ -3,7 +3,9 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWordsStore } from '@/stores/words'
 import { useSpeech } from '@/composables/useSpeech'
 import { useSettingsStore } from '@/stores/settings'
+import { useFullscreen } from '@/composables/useFullscreen'
 import WordCard from '@/components/WordCard.vue'
+import FocusCard from '@/components/FocusCard.vue'
 import AppButton from '@/components/AppButton.vue'
 import SpeakButton from '@/components/SpeakButton.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
@@ -14,6 +16,12 @@ const props = defineProps<{ levelId: string }>()
 const library = useWordsStore()
 const settings = useSettingsStore()
 const { speak } = useSpeech()
+const focus = useFullscreen()
+
+/** In focus mode a tap is the only way to hear the word, so it always speaks. */
+function speakCurrent() {
+  if (current.value) speak(current.value.text)
+}
 
 const level = computed(() => library.getLevel(Number(props.levelId) as LevelId))
 const index = ref(0)
@@ -137,8 +145,36 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </AppButton>
     </div>
 
+    <div class="mt-6 flex justify-center">
+      <button
+        type="button"
+        class="chunky-btn flex items-center gap-2 bg-white px-5 py-2.5 text-ink shadow-[0_4px_0_0_rgba(30,42,71,0.15)] dark:bg-night-card dark:text-paper dark:shadow-[0_4px_0_0_rgba(0,0,0,0.5)]"
+        @click="focus.enter()"
+      >
+        <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
+        </svg>
+        Big word mode
+      </button>
+    </div>
+
     <p class="mt-6 text-center text-sm opacity-40">
       Tip: use ← and → to move, space to hear the word.
     </p>
+
+    <FocusCard
+      v-if="focus.active.value"
+      :word="current.text"
+      :accent="level.accent"
+      navigable
+      :can-previous="!atStart"
+      :can-next="!atEnd"
+      :position="index + 1"
+      :total="words.length"
+      @close="focus.exit()"
+      @next="next"
+      @previous="previous"
+      @speak="speakCurrent"
+    />
   </div>
 </template>

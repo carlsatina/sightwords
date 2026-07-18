@@ -5,7 +5,9 @@ import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { useSpeech } from '@/composables/useSpeech'
 import { useConfetti } from '@/composables/useConfetti'
+import { useFullscreen } from '@/composables/useFullscreen'
 import WordCard from '@/components/WordCard.vue'
+import FocusCard from '@/components/FocusCard.vue'
 import AppButton from '@/components/AppButton.vue'
 import SpeakButton from '@/components/SpeakButton.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
@@ -33,6 +35,11 @@ const progress = useProgressStore()
 const settings = useSettingsStore()
 const { speak } = useSpeech()
 const { burst } = useConfetti()
+const focus = useFullscreen()
+
+function speakCurrent() {
+  if (current.value) speak(current.value.text)
+}
 
 const index = ref(0)
 const correctCount = ref(0)
@@ -74,6 +81,8 @@ function mark(correct: boolean) {
 
   if (index.value >= total.value - 1) {
     finished.value = true
+    // The results screen has nothing to do with focus mode, so step out of it.
+    if (focus.active.value) focus.exit()
     // Celebrate only a clean run; confetti for every session makes it noise.
     if (correctCount.value === total.value) burst(120)
     emit('finished', correctCount.value, total.value)
@@ -159,6 +168,16 @@ const summary = computed(() => {
         >
           {{ showSentence ? 'Hide sentence' : 'Show sentence' }}
         </button>
+        <button
+          type="button"
+          class="chunky-btn flex items-center gap-2 bg-white px-5 py-2.5 text-ink shadow-[0_4px_0_0_rgba(30,42,71,0.15)] dark:bg-night-card dark:text-paper dark:shadow-[0_4px_0_0_rgba(0,0,0,0.5)]"
+          @click="focus.enter()"
+        >
+          <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
+          </svg>
+          Big word mode
+        </button>
       </div>
 
       <p class="mt-8 mb-3 text-center text-sm font-bold tracking-[0.18em] uppercase opacity-45">
@@ -172,6 +191,29 @@ const summary = computed(() => {
           ↻ Try again
         </AppButton>
       </div>
+
+      <!-- Marking is what advances a card here, so focus mode keeps the two
+           buttons rather than offering a swipe that would skip the score. -->
+      <FocusCard
+        v-if="focus.active.value"
+        :word="current.text"
+        :accent="accent"
+        :position="index + 1"
+        :total="total"
+        @close="focus.exit()"
+        @speak="speakCurrent"
+      >
+        <template #actions>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <AppButton variant="success" size="lg" block @click="mark(true)">
+              ✓ Correct
+            </AppButton>
+            <AppButton variant="danger" size="lg" block @click="mark(false)">
+              ↻ Try again
+            </AppButton>
+          </div>
+        </template>
+      </FocusCard>
     </template>
 
     <!-- Results ------------------------------------------------------------->
