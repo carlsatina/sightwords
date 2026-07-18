@@ -8,12 +8,29 @@ import { useSettingsStore } from '@/stores/settings'
 
 const voices = shallowRef<SpeechSynthesisVoice[]>([])
 const speaking = ref(false)
-let voicesLoaded = false
+let listenerAttached = false
 
-function loadVoices() {
+/**
+ * Chrome returns an empty list from the first getVoices() call and fills it in
+ * later. It normally announces that with `voiceschanged`, but that event is
+ * unreliable — if it never fires, the app would show no voices at all. Poll a
+ * few times as a backstop, then give up rather than spin forever.
+ */
+const VOICE_RETRY_DELAYS = [100, 300, 700, 1500]
+
+function loadVoices(attempt = 0) {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
+
   const available = window.speechSynthesis.getVoices()
-  if (available.length > 0) voices.value = available
+  if (available.length > 0) {
+    voices.value = available
+    return
+  }
+
+  const delay = VOICE_RETRY_DELAYS[attempt]
+  if (delay !== undefined) {
+    setTimeout(() => loadVoices(attempt + 1), delay)
+  }
 }
 
 export function useSpeech() {
@@ -24,11 +41,17 @@ export function useSpeech() {
     'SpeechSynthesisUtterance' in window
 
   onMounted(() => {
-    if (!supported || voicesLoaded) return
-    voicesLoaded = true
+    if (!supported) return
+
+    // Read on every mount, not just the first. getVoices() is cheap, and a
+    // component opened later (the settings page, typically) must not be stuck
+    // with whatever the list looked like when the app first booted.
     loadVoices()
-    // Chrome populates the voice list asynchronously after first call.
-    window.speechSynthesis.addEventListener('voiceschanged', loadVoices)
+
+    if (!listenerAttached) {
+      listenerAttached = true
+      window.speechSynthesis.addEventListener('voiceschanged', () => loadVoices())
+    }
   })
 
   /** Prefer an English voice so sight words aren't read with a foreign phoneme set. */

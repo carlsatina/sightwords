@@ -41,9 +41,25 @@ const recentActivity = computed(() =>
   })),
 )
 
-const englishVoices = computed(() =>
-  voices.value.filter((voice) => voice.lang.startsWith('en')),
-)
+/**
+ * English voices first, since the words are English and a non-English voice
+ * reads them with the wrong phoneme set — but the rest stay selectable rather
+ * than hidden, because a bilingual household may well want one.
+ */
+const groupedVoices = computed(() => {
+  const byName = (a: SpeechSynthesisVoice, b: SpeechSynthesisVoice) =>
+    a.name.localeCompare(b.name)
+  return {
+    english: voices.value.filter((v) => v.lang.startsWith('en')).sort(byName),
+    other: voices.value.filter((v) => !v.lang.startsWith('en')).sort(byName),
+  }
+})
+
+/** Picking a voice plays it straight away — you judge a voice by hearing it. */
+function chooseVoice(voiceURI: string) {
+  settings.update('speechVoiceURI', voiceURI || null)
+  speak('The cat is here.')
+}
 </script>
 
 <template>
@@ -213,26 +229,54 @@ const englishVoices = computed(() =>
             />
           </label>
 
-          <label v-if="englishVoices.length" class="mt-4 block">
-            <span class="mb-1 block text-sm font-semibold opacity-70">Voice</span>
-            <select
-              class="w-full rounded-2xl bg-ink/5 p-3 font-semibold dark:bg-white/10"
-              :value="settings.settings.speechVoiceURI ?? ''"
-              @change="
-                settings.update(
-                  'speechVoiceURI',
-                  ($event.target as HTMLSelectElement).value || null,
-                )
-              "
-            >
-              <option value="">Browser default</option>
-              <option v-for="voice in englishVoices" :key="voice.voiceURI" :value="voice.voiceURI">
-                {{ voice.name }} ({{ voice.lang }})
-              </option>
-            </select>
-          </label>
+          <div class="mt-4">
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold opacity-70">Voice</span>
+              <select
+                class="w-full rounded-2xl bg-ink/5 p-3 font-semibold dark:bg-white/10"
+                :value="settings.settings.speechVoiceURI ?? ''"
+                :disabled="voices.length === 0"
+                @change="chooseVoice(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">Browser default</option>
+                <optgroup v-if="groupedVoices.english.length" label="English">
+                  <option
+                    v-for="voice in groupedVoices.english"
+                    :key="voice.voiceURI"
+                    :value="voice.voiceURI"
+                  >
+                    {{ voice.name }} ({{ voice.lang }})
+                  </option>
+                </optgroup>
+                <optgroup v-if="groupedVoices.other.length" label="Other languages">
+                  <option
+                    v-for="voice in groupedVoices.other"
+                    :key="voice.voiceURI"
+                    :value="voice.voiceURI"
+                  >
+                    {{ voice.name }} ({{ voice.lang }})
+                  </option>
+                </optgroup>
+              </select>
+            </label>
 
-          <AppButton class="mt-4" variant="ghost" size="sm" @click="speak('Hello, let us read together.')">
+            <!-- Say why the list is empty rather than hiding the control, which
+                 reads as the feature not existing. -->
+            <p v-if="voices.length === 0" class="mt-2 text-xs opacity-55">
+              Still looking for voices on this device. If none appear, this browser
+              only offers its default voice.
+            </p>
+            <p v-else class="mt-2 text-xs opacity-55">
+              {{ voices.length }} voices available. Choosing one plays a sample.
+            </p>
+          </div>
+
+          <AppButton
+            class="mt-4"
+            variant="ghost"
+            size="sm"
+            @click="speak('The cat is here.')"
+          >
             Test voice
           </AppButton>
         </template>
