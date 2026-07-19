@@ -109,7 +109,9 @@ function sortedVoicesFor(language: Language) {
 function substituteName(code: LanguageCode): string {
   const tag = substituteLangFor(code)
   if (!tag) return ''
-  const primary = tag.split('-')[0]
+  // iOS reports `es_MX`; splitting on "-" alone would leave the raw tag in a
+  // sentence meant to read "using a Spanish voice instead".
+  const primary = tag.replace(/_/g, '-').split('-')[0]
   try {
     return new Intl.DisplayNames([settings.settings.uiLocale], { type: 'language' }).of(
       primary,

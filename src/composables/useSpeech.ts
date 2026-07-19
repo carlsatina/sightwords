@@ -78,12 +78,24 @@ function loadVoices(attempt = 0) {
 }
 
 /**
+ * Normalises a language tag for comparison.
+ *
+ * Browsers do not agree on the separator: BCP-47 says `en-US`, but iOS and
+ * some Android builds report `en_US` with an underscore. Splitting on `-`
+ * alone turned `en_US` into `en_us`, which matched no language at all — that
+ * is what left a phone with 91 installed voices insisting it had none.
+ */
+function normaliseTag(tag: string): string {
+  return tag.replace(/_/g, '-').toLowerCase()
+}
+
+/**
  * Matches on the primary subtag only, so an en-GB voice serves an en-US card
  * and a fil voice serves fil-PH. Regional accent is a far smaller problem than
  * silence.
  */
 function primarySubtag(tag: string): string {
-  return tag.split('-')[0]!.toLowerCase()
+  return normaliseTag(tag).split('-')[0]!
 }
 
 export function useSpeech() {
@@ -175,7 +187,7 @@ export function useSpeech() {
     // since Castilian's c/z "th" has no Filipino counterpart.
     for (const tag of fallbacks) {
       const regional = pick(
-        voices.value.filter((v) => v.lang.toLowerCase() === tag.toLowerCase()),
+        voices.value.filter((v) => normaliseTag(v.lang) === normaliseTag(tag)),
       )
       if (regional) return asSubstitute(regional)
     }

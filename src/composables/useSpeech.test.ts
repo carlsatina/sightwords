@@ -99,6 +99,56 @@ describe('while the voice list is unknown', () => {
   })
 })
 
+describe('language tags with underscores', () => {
+  // iOS and some Android builds report `en_US` rather than `en-US`. Splitting
+  // on "-" alone turned that into "en_us", which matched no language at all —
+  // a phone with 91 installed voices insisted it had none, and every audio
+  // control disappeared.
+  it('matches a voice whichever separator the browser uses', () => {
+    currentVoices = [voice('Samantha', 'en_US'), voice('Kyoko', 'ja_JP')]
+    const speech = withSpeech()
+
+    expect(speech.hasVoiceFor('en-US')).toBe(true)
+    expect(speech.hasVoiceFor('ja-JP')).toBe(true)
+    expect(speech.voiceStatusFor('en')).toBe('exact')
+    expect(speech.voiceStatusFor('ja')).toBe('exact')
+  })
+
+  it('speaks with the underscore-tagged voice rather than the default', () => {
+    currentVoices = [voice('Samantha', 'en_US')]
+    const speech = withSpeech()
+    speech.speak('cat', { lang: 'en-US' })
+
+    expect(spoken[0].voice).toBe('Samantha')
+  })
+
+  it('still finds the Spanish stand-in for Filipino', () => {
+    currentVoices = [voice('Paulina', 'es_MX')]
+    const speech = withSpeech()
+
+    expect(speech.hasVoiceFor('fil-PH')).toBe(true)
+    expect(speech.voiceStatusFor('fil')).toBe('substitute')
+  })
+
+  it('keeps preferring Latin American Spanish over Castilian', () => {
+    // The regional ordering has to survive normalisation too.
+    currentVoices = [voice('Monica', 'es_ES'), voice('Paulina', 'es_MX')]
+    const speech = withSpeech()
+    useSettingsStore().setLanguage('fil')
+    speech.speak('ako')
+
+    expect(spoken[0].voice).toBe('Paulina')
+  })
+
+  it('does not invent a match across different languages', () => {
+    // Normalising must not become "match anything" — Japanese has no stand-in.
+    currentVoices = [voice('Samantha', 'en_US')]
+    const speech = withSpeech()
+
+    expect(speech.hasVoiceFor('ja-JP')).toBe(false)
+  })
+})
+
 describe('once the voice list has arrived', () => {
   it('reports a language with no voice and no stand-in as missing', () => {
     currentVoices = [voice('Samantha', 'en-US')]
