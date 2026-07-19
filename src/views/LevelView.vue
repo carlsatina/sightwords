@@ -5,7 +5,7 @@ import { useCardsStore } from '@/stores/cards'
 import { MASTERY_STREAK, useProgressStore } from '@/stores/progress'
 import ProgressBar from '@/components/ProgressBar.vue'
 import LevelNotFound from '@/components/LevelNotFound.vue'
-import type { LevelId } from '@/types'
+import { cardText, type LevelId } from '@/types'
 
 const props = defineProps<{ levelId: string }>()
 
@@ -105,7 +105,7 @@ const STATUS_CLASS: Record<string, string> = {
         :class="STATUS_CLASS[statusOf(card.id)]"
         :lang="card.language"
       >
-        {{ card.kind === 'kanji' ? card.char : card.text }}
+        {{ cardText(card) }}
         <span class="sr-only"> — {{ t(`level.status.${statusOf(card.id)}`) }}</span>
       </li>
     </ul>

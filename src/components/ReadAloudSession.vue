@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AccentName, Card, PracticeMode } from '@/types'
-import { detailKind, detailLabelKeys, spokenDetail } from '@/lib/cards'
+import { cardText, type AccentName, type Card, type PracticeMode } from '@/types'
+import { detailKind, detailLabelKeys, spokenDetail, spokenFace } from '@/lib/cards'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { useSpeech } from '@/composables/useSpeech'
@@ -13,6 +13,7 @@ import FocusCard from '@/components/FocusCard.vue'
 import AppButton from '@/components/AppButton.vue'
 import SpeakButton from '@/components/SpeakButton.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
+import RoundComplete from '@/components/RoundComplete.vue'
 
 /**
  * The shared "child reads aloud, grown-up marks it" flow, used by Practice,
@@ -27,11 +28,19 @@ const props = withDefaults(
     title: string
     /** Shown on the results screen once every card has been marked. */
     finishLabel?: string
+    /**
+     * Which round this is. Present when the caller deals in rounds, which
+     * turns the end of a deck into a choice rather than a full stop.
+     */
+    round?: number
   }>(),
   { accent: 'mint' },
 )
 
-const emit = defineEmits<{ finished: [correct: number, total: number] }>()
+const emit = defineEmits<{
+  finished: [correct: number, total: number]
+  nextRound: []
+}>()
 
 const progress = useProgressStore()
 const settings = useSettingsStore()
@@ -40,16 +49,8 @@ const { burst } = useConfetti()
 const focus = useFullscreen()
 const { t } = useI18n()
 
-/**
- * What gets spoken for a card. A kanji is read by one of its readings rather
- * than by the character itself — a synthesiser handed a bare kanji picks a
- * reading arbitrarily, and often the wrong one for the level being taught.
- * Kun'yomi comes first: it is the reading a first-grader meets in isolation.
- */
-function spokenText(card: Card): string {
-  if (card.kind !== 'kanji') return card.text
-  return card.kun[0] ?? card.on[0] ?? card.char
-}
+/** See `spokenFace`: a letter says its sound, a kanji says a reading. */
+const spokenText = spokenFace
 
 function speakCurrent() {
   if (current.value) speak(spokenText(current.value))
@@ -63,6 +64,8 @@ function speakSentence() {
 
 const index = ref(0)
 const correctCount = ref(0)
+/** Shown between rounds, before the results screen. */
+const celebrating = ref(false)
 const missedCards = ref<Card[]>([])
 const showDetail = ref(false)
 const finished = ref(false)
@@ -119,11 +122,17 @@ function mark(correct: boolean) {
   setTimeout(() => (lastMark.value = null), 450)
 
   if (index.value >= total.value - 1) {
-    finished.value = true
-    // The results screen has nothing to do with focus mode, so step out of it.
+    // The celebration has nothing to do with focus mode, so step out of it.
     if (focus.active.value) focus.exit()
-    // Celebrate only a clean run; confetti for every session makes it noise.
-    if (correctCount.value === total.value) burst(120)
+
+    if (props.round !== undefined) {
+      // Rounds end on a choice: the modal celebrates and then asks.
+      celebrating.value = true
+    } else {
+      finished.value = true
+      // Celebrate only a clean run; confetti for every session makes it noise.
+      if (correctCount.value === total.value) burst(120)
+    }
     emit('finished', correctCount.value, total.value)
   } else {
     index.value++
@@ -135,8 +144,22 @@ function restart() {
   correctCount.value = 0
   missedCards.value = []
   finished.value = false
+  celebrating.value = false
   showDetail.value = false
   maybeSpeak()
+}
+
+/** Takes the next round of cards and starts it clean. */
+function continueRounds() {
+  celebrating.value = false
+  emit('nextRound')
+  restart()
+}
+
+/** Ends the run here, showing the results screen the round would have skipped. */
+function stopRounds() {
+  celebrating.value = false
+  finished.value = true
 }
 
 const scorePercent = computed(() =>
@@ -258,6 +281,16 @@ const summary = computed(() => {
       </FocusCard>
     </template>
 
+    <RoundComplete
+      v-if="celebrating"
+      :count="total"
+      :round="round ?? 1"
+      :correct="correctCount"
+      :total="total"
+      @continue="continueRounds"
+      @finish="stopRounds"
+    />
+
     <!-- Results ------------------------------------------------------------->
     <template v-else-if="finished">
       <div class="deck-card mx-auto max-w-2xl p-8 text-center">
@@ -287,7 +320,7 @@ const summary = computed(() => {
               class="rounded-2xl bg-coral/20 px-4 py-2 font-[family-name:var(--font-word)] text-xl font-bold"
               :lang="card.language"
             >
-              {{ card.kind === 'kanji' ? card.char : card.text }}
+              {{ cardText(card) }}
             </li>
           </ul>
         </div>

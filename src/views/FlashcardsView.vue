@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { shuffle } from '@/lib/random'
 import { useCardsStore } from '@/stores/cards'
 import { useSpeech } from '@/composables/useSpeech'
@@ -12,8 +13,16 @@ import AppButton from '@/components/AppButton.vue'
 import SpeakButton from '@/components/SpeakButton.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
 import LevelNotFound from '@/components/LevelNotFound.vue'
-import type { Card, LevelId } from '@/types'
-import { detailKind, detailLabelKeys, spokenDetail } from '@/lib/cards'
+import RoundComplete from '@/components/RoundComplete.vue'
+import { useRounds } from '@/composables/useRounds'
+import type { LevelId } from '@/types'
+import {
+  detailKind,
+  detailLabelKeys,
+  detailSpeakKey,
+  spokenDetail,
+  spokenFace,
+} from '@/lib/cards'
 
 const props = defineProps<{ levelId: string }>()
 
@@ -22,16 +31,10 @@ const settings = useSettingsStore()
 const { speak, currentLang, hasVoiceFor } = useSpeech()
 const focus = useFullscreen()
 const { t } = useI18n()
+const router = useRouter()
 
-/**
- * What gets spoken for a card. A kanji is read by one of its readings — handed
- * the bare character, a synthesiser picks a reading arbitrarily, often not the
- * one the level teaches.
- */
-function spokenText(card: Card): string {
-  if (card.kind !== 'kanji') return card.text
-  return card.kun[0] ?? card.on[0] ?? card.char
-}
+/** See `spokenFace`: a letter says its sound, a kanji says a reading. */
+const spokenText = spokenFace
 
 function speakCurrent() {
   if (current.value) speak(spokenText(current.value))
@@ -50,32 +53,38 @@ const showDetail = ref(false)
 const direction = ref<1 | -1>(1)
 
 /**
- * Shuffled once per visit, so a child learns the card rather than its position
- * in the deck — the third card being "blue" every single time is a cue they
- * can lean on instead of reading.
- *
- * Snapshotted into a ref rather than computed on the fly: a computed would
- * reshuffle whenever the library changed, teleporting the child to a different
- * card mid-session.
+ * Cards are dealt in rounds of twenty drawn from the whole level, shuffled, so
+ * a child learns the card rather than its position in the deck — the third
+ * card being "blue" every time is a cue they can lean on instead of reading.
  */
-const cards = ref<Card[]>([])
+const pool = computed(() => level.value?.cards ?? [])
+const { cards, roundNumber, nextRound, reset } = useRounds(pool)
 
-watch(
-  [() => props.levelId, () => library.language.code],
-  () => {
-    cards.value = level.value ? shuffle(level.value.cards) : []
-    index.value = 0
-    showDetail.value = false
-  },
-  { immediate: true },
-)
+const roundComplete = ref(false)
 
-/** Reshuffles the current level and starts again from the top. */
+watch([() => props.levelId, () => library.language.code], () => {
+  reset()
+  index.value = 0
+  showDetail.value = false
+  roundComplete.value = false
+})
+
+/** Reshuffles the current round and starts it again from the top. */
 function reshuffle() {
   cards.value = shuffle(cards.value)
   index.value = 0
   showDetail.value = false
   direction.value = 1
+}
+
+/** Deals a fresh twenty and starts over. */
+function continueRounds() {
+  roundComplete.value = false
+  nextRound()
+  index.value = 0
+  showDetail.value = false
+  direction.value = 1
+  if (focus.active.value) focus.exit()
 }
 const current = computed(() => cards.value[index.value])
 const atStart = computed(() => index.value === 0)
@@ -96,6 +105,17 @@ const canHear = computed(
  * word, or a kanji's readings — so its label is derived from the card rather
  * than assumed. See `detailKind`.
  */
+/**
+ * What the second speaker button reads. A letter card has no sentence — its
+ * reveal is example words — so the label has to follow the card, like the
+ * toggle beside it.
+ */
+const detailSpeakLabel = computed(() => {
+  const card = current.value
+  const kind = card ? detailKind(card) : null
+  return kind ? detailSpeakKey(kind) : 'speak.hearSentence'
+})
+
 const detailLabel = computed(() => {
   const card = current.value
   const kind = card ? detailKind(card) : null
@@ -105,7 +125,11 @@ const detailLabel = computed(() => {
 })
 
 function next() {
-  if (atEnd.value) return
+  if (atEnd.value) {
+    // The end of a round is a moment, not a dead end.
+    roundComplete.value = true
+    return
+  }
   direction.value = 1
   index.value++
 }
@@ -194,7 +218,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <SpeakButton
         v-if="showDetail && spokenDetail(current)"
         :text="spokenDetail(current)!"
-        :label="t('session.readSentence')"
+        :label="t(detailSpeakLabel)"
         size="sm"
       />
     </div>
@@ -206,12 +230,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <AppButton v-if="!atEnd" variant="primary" size="lg" @click="next">
         {{ t('session.nextArrow') }}
       </AppButton>
-      <AppButton
-        v-else
-        variant="success"
-        size="lg"
-        :to="{ name: 'level', params: { levelId: level.id } }"
-      >
+      <AppButton v-else variant="success" size="lg" @click="next">
         {{ t('session.finishCheck') }}
       </AppButton>
     </div>
@@ -224,7 +243,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         class="rounded-xl px-3 py-1.5 text-sm font-bold underline opacity-60 hover:opacity-100"
         @click="reshuffle"
       >
-        🔀 {{ t('session.shuffleAgain') }}
+        {{ t('session.shuffleAgain') }}
       </button>
     </div>
 
@@ -245,8 +264,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       {{ canHear ? t('session.keyboardTip') : t('session.keyboardTipNoAudio') }}
     </p>
 
+    <RoundComplete
+      v-if="roundComplete"
+      :count="cards.length"
+      :round="roundNumber"
+      @continue="continueRounds"
+      @finish="router.push({ name: 'level', params: { levelId: level.id } })"
+    />
+
     <FocusCard
-      v-if="focus.active.value"
+      v-if="focus.active.value && !roundComplete"
       :card="current"
       :accent="level.accent"
       :show-detail="showDetail"

@@ -40,7 +40,14 @@ export function cardId(language: LanguageCode, text: string): string {
 
 /** The display text a draft is keyed on. */
 export function draftText(draft: CardDraft): string {
-  return draft.kind === 'kanji' ? draft.char : draft.text
+  switch (draft.kind) {
+    case 'kanji':
+      return draft.char
+    case 'letter':
+      return draft.letter
+    default:
+      return draft.text
+  }
 }
 
 // --- Validation -----------------------------------------------------------
@@ -61,9 +68,39 @@ export function validateCard({
   language,
   takenIds,
 }: CardValidationInput): string | null {
-  return draft.kind === 'kanji'
-    ? validateKanji(draft, language, takenIds)
-    : validateWord(draft, language, takenIds)
+  switch (draft.kind) {
+    case 'kanji':
+      return validateKanji(draft, language, takenIds)
+    case 'letter':
+      return validateLetter(draft, language, takenIds)
+    default:
+      return validateWord(draft, language, takenIds)
+  }
+}
+
+function validateLetter(
+  draft: Extract<CardDraft, { kind: 'letter' }>,
+  language: LanguageCode,
+  takenIds: Set<string>,
+): string | null {
+  const letter = draft.letter.trim()
+
+  if (!letter) return 'Enter a letter.'
+  // Counted by code point so a digraph like "ck" or "qu" is allowed through as
+  // the two-letter grapheme it is, while a whole word is not.
+  if ([...letter].length > 2) return 'Enter a letter or a two-letter pair.'
+  if (!/^\p{L}+$/u.test(letter)) return 'Use letters only.'
+  if (takenIds.has(cardId(language, letter))) {
+    return `“${letter}” is already in this language’s card list.`
+  }
+  // Without the sound there is nothing to teach and nothing to speak — the
+  // card would show a shape and read out the letter's name instead.
+  if (!draft.sound.trim()) return `Enter the sound “${letter}” makes.`
+  if (draft.examples.length === 0) {
+    return `Enter at least one word that uses “${letter}”.`
+  }
+
+  return null
 }
 
 function validateWord(
@@ -381,6 +418,21 @@ function parseCard(
       meaning: k.meaning.trim(),
       ...(k.example ? { example: k.example } : {}),
     }
+  } else if (kind === 'letter') {
+    const l = candidate as Extract<CardDraft, { kind: 'letter' }>
+    if (typeof l.letter !== 'string' || typeof l.sound !== 'string') {
+      throw new LibraryImportError(
+        `${where}, card ${index + 1} needs both a letter and a sound.`,
+      )
+    }
+    draft = {
+      kind: 'letter',
+      letter: l.letter.trim(),
+      sound: l.sound.trim(),
+      examples: Array.isArray(l.examples)
+        ? l.examples.filter((e) => typeof e === 'string' && e.trim())
+        : [],
+    }
   } else if (kind === 'word') {
     const w = candidate as Extract<CardDraft, { kind: 'word' }>
     if (typeof w.text !== 'string' || typeof w.sentence !== 'string') {
@@ -401,7 +453,7 @@ function parseCard(
     }
   } else {
     throw new LibraryImportError(
-      `${where}, card ${index + 1} has kind “${kind}”; use “word” or “kanji”.`,
+      `${where}, card ${index + 1} has kind “${kind}”; use “word”, “letter” or “kanji”.`,
     )
   }
 

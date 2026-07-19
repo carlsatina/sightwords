@@ -41,6 +41,24 @@ export function wordLevel(
   return { id, ...meta, cards }
 }
 
+/** A letter, the sound it makes, and words that start with it. */
+export type RawLetter = readonly [letter: string, sound: string, examples: string]
+
+export function letterLevel(
+  id: LevelId,
+  meta: LevelMeta,
+  letters: readonly RawLetter[],
+): StoredLevel {
+  const cards: CardDraft[] = letters.map(([letter, sound, examples]) => ({
+    kind: 'letter',
+    letter,
+    sound,
+    // Written space-separated in the data so a row stays readable at a glance.
+    examples: examples.split(' ').filter(Boolean),
+  }))
+  return { id, ...meta, cards }
+}
+
 /**
  * A kanji entry: character, on'yomi (katakana), kun'yomi (hiragana), English
  * meaning, and optionally an example word with its reading and gloss.

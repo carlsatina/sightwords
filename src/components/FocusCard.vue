@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useSwipe } from '@/composables/useSwipe'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
-import type { AccentName, Card } from '@/types'
+import { cardText, type AccentName, type Card } from '@/types'
 import {
   detailKind,
   detailLabelKeys,
@@ -58,9 +58,7 @@ const settings = useSettingsStore()
 const { t } = useI18n()
 
 /** The glyph this mode exists to show, whichever kind of card it came from. */
-const face = computed(() =>
-  props.card.kind === 'kanji' ? props.card.char : props.card.text,
-)
+const face = computed(() => cardText(props.card))
 
 const container = ref<HTMLElement | null>(null)
 /** The tap hint earns its place only until the parent has tapped once. */
@@ -77,7 +75,9 @@ const controlsVisible = computed(() => settings.settings.showFocusControls)
  * is just more text competing with the one thing this mode exists to show.
  * Tap still speaks and swipe still moves, so nothing is actually lost.
  */
-const minimal = computed(() => props.card.language === 'en')
+const minimal = computed(
+  () => props.card.language === 'en' && props.card.kind === 'word',
+)
 
 /**
  * What this card reveals, and what to call it. A kanji reveals readings and a
@@ -279,6 +279,34 @@ watch(
         <p v-if="card.meaning" lang="en" class="text-sm font-semibold opacity-40">
           {{ card.meaning }}
         </p>
+      </div>
+
+      <!-- Letter reveal: the sound, and words that carry it. -->
+      <div
+        v-else-if="hasDetail && showDetail && card.kind === 'letter'"
+        class="relative z-10 flex max-h-[38vh] shrink-0 flex-col items-center gap-1 overflow-y-auto px-6 pb-3 text-center"
+      >
+        <p class="text-lg [@media(min-height:560px)]:text-2xl">
+          <span class="opacity-45">{{ t('session.says') }}</span>
+          <span class="ml-2 font-semibold opacity-80">“{{ card.sound }}”</span>
+        </p>
+        <div class="flex items-center justify-center gap-2">
+          <p class="font-[family-name:var(--font-word)] text-base opacity-55">
+            {{ card.examples.join(' · ') }}
+          </p>
+          <button
+            v-if="canSpeak && detailSpeech"
+            type="button"
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink/5 text-ink transition hover:bg-ink/10 dark:bg-white/10 dark:text-paper"
+            :aria-label="t(speakDetailKey)"
+            @click.stop="emit('speakDetail')"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+              <path d="M16 9a4 4 0 0 1 0 6" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <!-- Kanji reveal: readings and gloss. Without this the whole point of a

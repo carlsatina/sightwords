@@ -13,10 +13,12 @@ import type { Card } from '@/types'
  * Returns null when there is nothing to reveal, which is how callers decide
  * whether to render the toggle at all.
  */
-export type DetailKind = 'sentence' | 'example' | 'meaning'
+export type DetailKind = 'sentence' | 'example' | 'meaning' | 'sound'
 
 export function detailKind(card: Card): DetailKind | null {
   if (card.kind === 'kanji') return 'meaning'
+  // A letter card reveals the sound it makes and the words it starts.
+  if (card.kind === 'letter') return 'sound'
   if (!card.sentence) return null
   // Japanese is not written with spaces and the kana levels deliberately pair a
   // character with an example word rather than a sentence.
@@ -26,6 +28,8 @@ export function detailKind(card: Card): DetailKind | null {
 /** Message keys for the reveal toggle, matched to what it actually reveals. */
 export function detailLabelKeys(kind: DetailKind): { show: string; hide: string } {
   switch (kind) {
+    case 'sound':
+      return { show: 'session.showSound', hide: 'session.hideSound' }
     case 'meaning':
       return { show: 'session.showMeaning', hide: 'session.hideMeaning' }
     case 'example':
@@ -48,5 +52,27 @@ export function detailSpeakKey(kind: DetailKind): string {
  */
 export function spokenDetail(card: Card): string | null {
   if (card.kind === 'word') return card.sentence || null
+  // A letter's reveal is its example words; the first is enough to hear the
+  // sound sitting inside a real word.
+  if (card.kind === 'letter') return card.examples[0] ?? null
   return card.example?.text ?? null
+}
+
+/**
+ * What "Hear it" should say for a card.
+ *
+ * A letter card is the reason this exists: the synthesiser handed `s` reads it
+ * as the letter *name* — "ess" — which is precisely the confusion a phonics
+ * programme spends its first term undoing. The card's own written sound
+ * ("sss") is what gets spoken instead.
+ */
+export function spokenFace(card: Card): string {
+  switch (card.kind) {
+    case 'letter':
+      return card.sound
+    case 'kanji':
+      return card.kun[0] ?? card.on[0] ?? card.char
+    default:
+      return card.text
+  }
 }

@@ -6,11 +6,13 @@ import { sample, shuffle } from '@/lib/random'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { useSpeech } from '@/composables/useSpeech'
-import { useConfetti } from '@/composables/useConfetti'
 import AppButton from '@/components/AppButton.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
 import LevelNotFound from '@/components/LevelNotFound.vue'
-import type { Card, LevelId } from '@/types'
+import RoundComplete from '@/components/RoundComplete.vue'
+import { ROUND_SIZE } from '@/composables/useRounds'
+import { cardText, type Card, type LevelId } from '@/types'
+import { spokenFace } from '@/lib/cards'
 
 const props = defineProps<{ levelId: string }>()
 
@@ -18,10 +20,8 @@ const library = useCardsStore()
 const progress = useProgressStore()
 const settings = useSettingsStore()
 const { speak, currentLang, hasVoiceFor } = useSpeech()
-const { burst } = useConfetti()
 const { t } = useI18n()
 
-const QUESTION_COUNT = 10
 const CHOICES = 4
 
 const level = computed(() => library.getLevel(Number(props.levelId) as LevelId))
@@ -36,6 +36,9 @@ const index = ref(0)
 const selectedId = ref<string | null>(null)
 const correctCount = ref(0)
 const finished = ref(false)
+/** Shown between rounds, before the results screen. */
+const celebrating = ref(false)
+const roundNumber = ref(1)
 
 /**
  * The quiz has three shapes, because a single one cannot serve all the content
@@ -49,25 +52,33 @@ const finished = ref(false)
  *             is the Filipino case on most desktops, and it tests the same
  *             recognition without needing audio the device does not have.
  */
-const isKanjiQuiz = computed(
-  () => library.getLevel(Number(props.levelId))?.cards[0]?.kind === 'kanji',
+const levelKind = computed(
+  () => library.getLevel(Number(props.levelId))?.cards[0]?.kind ?? 'word',
 )
 
 const canHear = computed(
   () => settings.settings.speechEnabled && hasVoiceFor(currentLang.value),
 )
 
-const mode = computed<'meaning' | 'listen' | 'cloze'>(() => {
-  if (isKanjiQuiz.value) return 'meaning'
+const mode = computed<'meaning' | 'listen' | 'cloze' | 'sound'>(() => {
+  if (levelKind.value === 'kanji') return 'meaning'
+  // A letter is asked by its sound, either heard or shown in writing. It has
+  // no sentence, so the cloze fallback has nothing to blank out.
+  if (levelKind.value === 'letter') return canHear.value ? 'listen' : 'sound'
   return canHear.value ? 'listen' : 'cloze'
+})
+
+/** The question, matched to what the card actually is. */
+const promptKey = computed(() => {
+  if (mode.value === 'meaning') return 'quiz.whatMeaning'
+  if (levelKind.value === 'letter') return 'quiz.whichLetter'
+  return 'quiz.findWord'
 })
 
 /** The label shown on a choice button, which differs by question shape. */
 function choiceLabel(card: Card): string {
-  if (mode.value === 'meaning') {
-    return card.kind === 'kanji' ? card.meaning : card.text
-  }
-  return card.kind === 'kanji' ? card.char : card.text
+  if (mode.value === 'meaning' && card.kind === 'kanji') return card.meaning
+  return cardText(card)
 }
 
 /**
@@ -79,7 +90,7 @@ function buildQuestions(): Question[] {
   const levelCards = level.value?.cards ?? []
   if (levelCards.length === 0) return []
 
-  const asked = sample(levelCards, Math.min(QUESTION_COUNT, levelCards.length))
+  const asked = sample(levelCards, Math.min(ROUND_SIZE, levelCards.length))
 
   return asked.map((answer) => {
     const sameLevel = levelCards.filter((c) => c.id !== answer.id)
@@ -108,11 +119,8 @@ const isRight = computed(
   () => answered.value && selectedId.value === current.value?.answer.id,
 )
 
-/** A kanji is spoken by a reading; the bare character has no single one. */
-function spokenText(card: Card): string {
-  if (card.kind !== 'kanji') return card.text
-  return card.kun[0] ?? card.on[0] ?? card.char
-}
+/** See `spokenFace`: a letter says its sound, a kanji says a reading. */
+const spokenText = spokenFace
 
 function askCurrent() {
   if (mode.value !== 'listen' || !current.value) return
@@ -125,7 +133,20 @@ function start() {
   selectedId.value = null
   correctCount.value = 0
   finished.value = false
+  celebrating.value = false
   askCurrent()
+}
+
+/** Draws a fresh round of questions and begins it. */
+function continueRounds() {
+  roundNumber.value += 1
+  start()
+}
+
+/** Ends the run, showing the results screen the round would have skipped. */
+function stopRounds() {
+  celebrating.value = false
+  finished.value = true
 }
 
 onMounted(start)
@@ -145,9 +166,9 @@ function choose(card: Card) {
 
 function advance() {
   if (index.value >= questions.value.length - 1) {
-    finished.value = true
     progress.recordQuizResult(correctCount.value, questions.value.length)
-    if (correctCount.value === questions.value.length) burst(120)
+    // A round ends on a choice; a one-off quiz ends on its results.
+    celebrating.value = true
   } else {
     index.value++
     selectedId.value = null
@@ -187,7 +208,7 @@ const scorePercent = computed(() =>
 
 <template>
   <div v-if="level" class="pt-6">
-    <template v-if="!finished && current">
+    <template v-if="!finished && !celebrating && current">
       <div class="mb-6">
         <ProgressBar
           :value="index + 1"
@@ -200,7 +221,7 @@ const scorePercent = computed(() =>
 
       <div class="deck-card mb-6 p-6 text-center sm:p-8">
         <p class="text-sm font-bold tracking-[0.2em] uppercase opacity-50">
-          {{ mode === 'meaning' ? t('quiz.whatMeaning') : t('quiz.findWord') }}
+          {{ t(promptKey) }}
         </p>
 
         <!-- Kanji: the character is the question. -->
@@ -221,6 +242,17 @@ const scorePercent = computed(() =>
         >
           <span aria-hidden="true">🔊</span> {{ t('quiz.hearAgain') }}
         </button>
+
+        <!-- Letter without a voice: show the sound in writing instead. There
+             is no sentence to blank out, and the written sound is exactly what
+             the card teaches. -->
+        <p
+          v-else-if="mode === 'sound' && current.answer.kind === 'letter'"
+          lang="en"
+          class="mt-4 font-[family-name:var(--font-word)] text-[clamp(3rem,12vw,6rem)] leading-none font-bold"
+        >
+          “{{ current.answer.sound }}”
+        </p>
 
         <!-- Word without a voice: the sentence, with the word blanked out. -->
         <p
@@ -269,6 +301,16 @@ const scorePercent = computed(() =>
         </template>
       </p>
     </template>
+
+    <RoundComplete
+      v-if="celebrating"
+      :count="questions.length"
+      :round="roundNumber"
+      :correct="correctCount"
+      :total="questions.length"
+      @continue="continueRounds"
+      @finish="stopRounds"
+    />
 
     <div v-else-if="finished" class="deck-card mx-auto max-w-2xl p-8 text-center">
       <p class="text-7xl" aria-hidden="true">

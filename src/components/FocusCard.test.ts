@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { mount } from '@vue/test-utils'
 import FlashcardsView from '@/views/FlashcardsView.vue'
 import { useCardsStore } from '@/stores/cards'
+import { cardText } from '@/types'
 import { mountView, resetAppState } from '@/test/harness'
 import { installSpeechMock } from '@/test/speech'
 
@@ -15,36 +16,26 @@ beforeEach(() => {
   speech = installSpeechMock(['en-US', 'es-MX', 'ja-JP'])
 })
 
-/** English level-1 cards, which are all word cards. */
-function levelCards() {
-  return useCardsStore().getLevel(1)!.cards
-}
-
-function textOf(index: number) {
-  const card = levelCards()[index]
-  return card.kind === 'kanji' ? card.char : card.text
-}
-
 /**
  * English deliberately has no reveal toggle or navigation buttons in focus
  * mode, so any test about those controls has to use a language that keeps
  * them. Filipino is the natural stand-in — same word-card shape, plus a
  * translation worth revealing.
  */
-async function mountFlashcards(language: 'en' | 'fil' = 'en') {
+async function mountFlashcards(language: 'en' | 'fil' = 'en', levelId = '2') {
   if (language !== 'en') {
     const { useSettingsStore } = await import('@/stores/settings')
     useSettingsStore().setLanguage(language)
   }
-  const wrapper = await mountView(FlashcardsView, { levelId: '1' })
+  const wrapper = await mountView(FlashcardsView, { levelId })
   await wrapper.vm.$nextTick()
   return wrapper
 }
 
 /** Cards of whichever language the test mounted. */
 function cardsOf(language: 'en' | 'fil' = 'en') {
-  const level = useCardsStore().levelsForLanguage(language)[0]
-  return level.cards
+  const levels = useCardsStore().levelsForLanguage(language)
+  return (language === 'en' ? levels[1] : levels[0]).cards
 }
 
 /**
@@ -64,7 +55,7 @@ function shownCardData(
   language: 'en' | 'fil' = 'en',
 ) {
   const face = shownCard(wrapper)
-  return cardsOf(language).find((c) => (c.kind === 'kanji' ? c.char : c.text) === face)!
+  return cardsOf(language).find((c) => cardText(c) === face)!
 }
 
 function findByText(wrapper: ReturnType<typeof mount>, text: string) {
@@ -146,20 +137,24 @@ describe('focus mode', () => {
   })
 
   it('cannot swipe back past the first word', async () => {
+    // The deck is shuffled, so "the first card" is whatever opened — not the
+    // level's first entry.
     const wrapper = await mountFlashcards()
     const dialog = await openFocus(wrapper)
+    const first = shownCard(wrapper)
+
     await dialog.trigger('touchstart', touch(120, 300))
     await dialog.trigger('touchmove', touch(320, 302))
     await dialog.trigger('touchend', touch(320, 302))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(0))
+    expect(shownCard(wrapper)).toBe(first)
   })
 
   it('keeps navigation buttons in the page for keyboard users', async () => {
     // Swiping is unavailable on a keyboard, so the same jobs need real controls
     // even when they are visually hidden.
-    const wrapper = await mountFlashcards('fil')
+    const wrapper = await mountFlashcards('fil', '1')
     const dialog = await openFocus(wrapper)
     expect(dialog.find('[aria-label="Next card"]').exists()).toBe(true)
     expect(dialog.find('[aria-label="Previous card"]').exists()).toBe(true)
@@ -208,7 +203,7 @@ describe('English keeps the bare screen', () => {
   })
 
   it('keeps the reveal for a language that needs it', async () => {
-    const wrapper = await mountFlashcards('fil')
+    const wrapper = await mountFlashcards('fil', '1')
     const dialog = await openFocus(wrapper)
 
     expect(dialog.find('[aria-label="Next card"]').exists()).toBe(true)
@@ -227,7 +222,7 @@ describe('focus mode controls', () => {
     // Reversed deliberately. They were hidden originally, on the theory that
     // tapping and swiping covered the same jobs — but an invisible gesture is
     // not a control, and nobody found them.
-    const wrapper = await mountFlashcards('fil')
+    const wrapper = await mountFlashcards('fil', '1')
     await openFocus(wrapper)
 
     const classes = controlBar(wrapper).className
@@ -236,7 +231,7 @@ describe('focus mode controls', () => {
   })
 
   it('offers a sentence toggle and a speaker for the sentence', async () => {
-    const wrapper = await mountFlashcards('fil')
+    const wrapper = await mountFlashcards('fil', '1')
     const dialog = await openFocus(wrapper)
 
     const toggle = wrapper
@@ -260,7 +255,7 @@ describe('focus mode controls', () => {
   })
 
   it('reads the sentence, not the word, from the sentence speaker', async () => {
-    const wrapper = await mountFlashcards('fil')
+    const wrapper = await mountFlashcards('fil', '1')
     await openFocus(wrapper)
 
     await wrapper
@@ -280,7 +275,7 @@ describe('focus mode controls', () => {
     const { useSettingsStore } = await import('@/stores/settings')
     useSettingsStore().update('showFocusControls', false)
 
-    const wrapper = await mountFlashcards('fil')
+    const wrapper = await mountFlashcards('fil', '1')
     await openFocus(wrapper)
 
     const classes = controlBar(wrapper).className
@@ -309,7 +304,7 @@ describe('focus mode controls', () => {
     const { useSettingsStore } = await import('@/stores/settings')
     useSettingsStore().update('showFocusControls', false)
 
-    const wrapper = await mountFlashcards('fil')
+    const wrapper = await mountFlashcards('fil', '1')
     await openFocus(wrapper)
 
     const classes = controlBar(wrapper).className

@@ -58,13 +58,20 @@ describe('card ids', () => {
   })
 
   it('keeps the same spelling in two languages apart', () => {
+    // Built here rather than fished out of the shipped lists: the content can
+    // change (English became a phonics progression and lost "at"), but the
+    // namespacing rule this protects must hold regardless.
     const cards = useCardsStore()
-    const english = cards.everyCard.find((c) => c.id === 'en:at')
-    const filipino = cards.everyCard.find((c) => c.id === 'fil:at')
+    expect(
+      cards.addCard('en', 2, { kind: 'word', text: 'sala', sentence: 'A sala is here.' }),
+    ).toBeNull()
+    expect(
+      cards.addCard('fil', 1, { kind: 'word', text: 'sala', sentence: 'Malinis ang sala.' }),
+    ).toBeNull()
 
-    expect(english).toBeDefined()
-    expect(filipino).toBeDefined()
-    expect(english!.id).not.toBe(filipino!.id)
+    expect(cards.getCard('en:sala')).toBeDefined()
+    expect(cards.getCard('fil:sala')).toBeDefined()
+    expect(cards.getCard('en:sala')!.id).not.toBe(cards.getCard('fil:sala')!.id)
   })
 })
 

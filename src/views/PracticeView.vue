@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCardsStore } from '@/stores/cards'
-import { shuffle } from '@/lib/random'
+import { useRounds } from '@/composables/useRounds'
 import ReadAloudSession from '@/components/ReadAloudSession.vue'
 import AppButton from '@/components/AppButton.vue'
 import LevelNotFound from '@/components/LevelNotFound.vue'
-import type { Card, LevelId } from '@/types'
+import type { LevelId } from '@/types'
 
 const props = defineProps<{ levelId: string }>()
 
@@ -15,21 +15,14 @@ const { t } = useI18n()
 const level = computed(() => library.getLevel(Number(props.levelId) as LevelId))
 
 /**
- * Shuffled once per visit so a child learns the card, not its position.
- *
- * Held in a ref rather than a computed: a computed would reshuffle if anything
- * it depends on changed, moving the child to a different card part-way through
- * a session they are being scored on.
+ * Dealt in rounds of twenty drawn from the whole level and shuffled, so a child
+ * learns the card rather than its position — and so a hundred-card level ends
+ * somewhere reachable.
  */
-const cards = ref<Card[]>([])
+const pool = computed(() => level.value?.cards ?? [])
+const { cards, roundNumber, nextRound, reset } = useRounds(pool)
 
-watch(
-  [() => props.levelId, () => library.language.code],
-  () => {
-    cards.value = level.value ? shuffle(level.value.cards) : []
-  },
-  { immediate: true },
-)
+watch([() => props.levelId, () => library.language.code], reset)
 </script>
 
 <template>
@@ -40,6 +33,8 @@ watch(
     :accent="level.accent"
     :title="t('practice.title', { level: level.name })"
     :finish-label="t('session.backToLevel')"
+    :round="roundNumber"
+    @next-round="nextRound"
   >
     <template #finish-action>
       <AppButton variant="primary" :to="{ name: 'level', params: { levelId: level.id } }">

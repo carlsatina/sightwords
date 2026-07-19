@@ -131,6 +131,48 @@ describe('kanji validation', () => {
   })
 })
 
+describe('letter validation', () => {
+  const takenIds = new Set<string>()
+  const letter = (over: Partial<Extract<CardDraft, { kind: 'letter' }>> = {}) =>
+    ({ kind: 'letter', letter: 's', sound: 'sss', examples: ['sun'], ...over }) as CardDraft
+
+  it('accepts a letter with a sound and an example', () => {
+    expect(validateCard({ draft: letter(), language: 'en', takenIds })).toBeNull()
+  })
+
+  it('accepts a two-letter grapheme like qu or ck', () => {
+    // These are single sounds spelled with two letters, and phonics teaches
+    // them as one unit.
+    expect(
+      validateCard({
+        draft: letter({ letter: 'qu', sound: 'kw', examples: ['queen'] }),
+        language: 'en',
+        takenIds,
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects a whole word masquerading as a letter', () => {
+    expect(
+      validateCard({ draft: letter({ letter: 'cat' }), language: 'en', takenIds }),
+    ).toMatch(/letter or a two-letter pair/)
+  })
+
+  it('rejects a letter with no sound', () => {
+    // Without it the card shows a shape and the app reads out the letter's
+    // name, which is the one thing a phonics card must not do.
+    expect(
+      validateCard({ draft: letter({ sound: '' }), language: 'en', takenIds }),
+    ).toMatch(/sound/)
+  })
+
+  it('rejects a letter with no example words', () => {
+    expect(
+      validateCard({ draft: letter({ examples: [] }), language: 'en', takenIds }),
+    ).toMatch(/at least one word/)
+  })
+})
+
 describe('sentenceContainsWord', () => {
   it('matches on word boundaries, not substrings', () => {
     expect(sentenceContainsWord('The cat sat.', 'cat')).toBe(true)

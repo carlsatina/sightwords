@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { detailKind, detailLabelKeys, detailSpeakKey, spokenDetail } from './cards'
+import {
+  detailKind,
+  detailLabelKeys,
+  detailSpeakKey,
+  spokenDetail,
+  spokenFace,
+} from './cards'
 import type { Card } from '@/types'
 
 /**
@@ -32,6 +38,43 @@ const kanji = (over: Partial<Card> = {}): Card =>
     example: { text: '一つ', reading: 'ひとつ', meaning: 'one thing' },
     ...over,
   }) as Card
+
+const letter = (over: Partial<Card> = {}): Card =>
+  ({
+    kind: 'letter',
+    id: 'en:s',
+    language: 'en',
+    levelId: 1,
+    letter: 's',
+    sound: 'sss',
+    examples: ['sun', 'sit', 'bus'],
+    ...over,
+  }) as Card
+
+describe('letter cards', () => {
+  it('speaks the sound, never the letter name', () => {
+    // The whole point of a phonics card. A synthesiser handed "s" reads it as
+    // "ess", which is precisely the confusion the first term of phonics is
+    // spent undoing.
+    expect(spokenFace(letter())).toBe('sss')
+    expect(spokenFace(letter())).not.toBe('s')
+  })
+
+  it('reveals its sound rather than a sentence', () => {
+    expect(detailKind(letter())).toBe('sound')
+    expect(detailLabelKeys('sound').show).toBe('session.showSound')
+  })
+
+  it('reads an example word aloud, not the bare sound', () => {
+    // The reveal lists words; hearing the sound inside a real word is what
+    // makes it stick.
+    expect(spokenDetail(letter())).toBe('sun')
+  })
+
+  it('has nothing to read aloud when it carries no examples', () => {
+    expect(spokenDetail(letter({ examples: [] } as Partial<Card>))).toBeNull()
+  })
+})
 
 describe('detailKind', () => {
   it('calls an English or Filipino reveal a sentence', () => {

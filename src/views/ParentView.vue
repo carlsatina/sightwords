@@ -7,7 +7,7 @@ import { useProgressStore } from '@/stores/progress'
 import { useSpeech } from '@/composables/useSpeech'
 import AppButton from '@/components/AppButton.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
-import type { Language, LanguageCode, LevelId } from '@/types'
+import { cardText, type Language, type LanguageCode, type LevelId } from '@/types'
 
 const library = useCardsStore()
 const settings = useSettingsStore()
@@ -57,7 +57,7 @@ const recentActivity = computed(() =>
     const card = library.getCard(answer.cardId)
     return {
       ...answer,
-      text: card ? (card.kind === 'kanji' ? card.char : card.text) : answer.cardId,
+      text: card ? cardText(card) : answer.cardId,
       language: card?.language ?? 'en',
       when: new Date(answer.at).toLocaleString(undefined, {
         month: 'short',

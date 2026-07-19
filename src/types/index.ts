@@ -63,7 +63,7 @@ export type AccentName = 'mint' | 'marigold' | 'coral' | 'grape' | 'ink'
  * fields would leave every consumer guessing which half was populated. The
  * discriminant makes each renderer state which kind it handles.
  */
-export type Card = WordCardData | KanjiCardData
+export type Card = WordCardData | KanjiCardData | LetterCardData
 
 interface CardBase {
   /** Namespaced as `${language}:${text}`. Stable id and progress key. */
@@ -99,6 +99,27 @@ export interface WordCardData extends CardBase {
   sentenceMeaning?: string
 }
 
+/**
+ * A single letter and the sound it makes — the first level of a phonics
+ * progression, where a child learns that `s` says /sss/ before meeting any
+ * whole word.
+ *
+ * Distinct from a word card because the thing being taught is a sound, not a
+ * spelling: "Hear it" has to say /sss/, never "ess". Reading the letter *name*
+ * aloud would teach the one thing a phonics programme is trying to avoid.
+ */
+export interface LetterCardData extends CardBase {
+  kind: 'letter'
+  letter: string
+  /**
+   * How the sound is written for a parent to say, e.g. "sss" for `s`. Not IPA:
+   * the audience is a grown-up reading it off a card, not a linguist.
+   */
+  sound: string
+  /** Two or three words beginning with the letter, to hear the sound in place. */
+  examples: string[]
+}
+
 export interface KanjiCardData extends CardBase {
   kind: 'kanji'
   /** The character itself. Doubles as the card's display text. */
@@ -115,7 +136,14 @@ export interface KanjiCardData extends CardBase {
 
 /** Display text for any card, for callers that just need something to show. */
 export function cardText(card: Card): string {
-  return card.kind === 'kanji' ? card.char : card.text
+  switch (card.kind) {
+    case 'kanji':
+      return card.char
+    case 'letter':
+      return card.letter
+    default:
+      return card.text
+  }
 }
 
 // --- Stored (editable) shapes ---------------------------------------------
@@ -129,6 +157,7 @@ export type CardDraft =
       meaning?: string
       sentenceMeaning?: string
     }
+  | { kind: 'letter'; letter: string; sound: string; examples: string[] }
   | {
       kind: 'kanji'
       char: string

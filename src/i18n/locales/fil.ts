@@ -35,7 +35,7 @@ const fil: typeof en = {
   },
   home: {
     known: 'Mga salitang alam mo',
-    knownCards: 'Mga karakter na alam mo',
+    knownCards: 'Mga alam mo na',
     dailyStartCards: '▶︎ {count} card ngayong araw',
     outOf: 'sa {total} na {unit}',
     unitWords: 'salita',
@@ -82,6 +82,9 @@ const fil: typeof en = {
     },
   },
   session: {
+    says: 'ang tunog ay',
+    showSound: 'Ipakita ang tunog',
+    hideSound: 'Itago ang tunog',
     shuffleAgain: 'Haluin',
     showExample: 'Ipakita ang halimbawa',
     hideExample: 'Itago ang halimbawa',
@@ -127,6 +130,17 @@ const fil: typeof en = {
     focusMode: 'Malaking salita',
     exitFocus: 'Isara ang malaking salita',
   },
+  round: {
+    title: 'Tapos ang {count} card!',
+    roundNumber: 'Ika-{round} na round',
+    doneBlurb: 'Natapos mo ang lahat ng {count}.',
+    praisePerfect: 'Lahat tama sa unang subok.',
+    praiseStrong: 'Magaling magbasa.',
+    praiseFair: 'Mahusay — may ilang kailangang ulitin.',
+    praiseLow: 'Kailangan pa ng pagsasanay. Subukan ulit.',
+    more: '{count} pa',
+    stop: 'Tama na',
+  },
   review: {
     title: 'Mahihirap na salita',
     emptyTitle: 'Walang mahirap na salita',
@@ -145,6 +159,7 @@ const fil: typeof en = {
     title: 'Pagsasanay sa {level}',
   },
   quiz: {
+    whichLetter: 'Aling letra ang may ganitong tunog?',
     findWord: 'Hanapin ang salitang ito',
     whatMeaning: 'Ano ang ibig sabihin nito?',
     questionOf: 'Tanong {current} sa {total}',
@@ -266,6 +281,12 @@ const fil: typeof en = {
     cancel: 'Kanselahin',
   },
   words: {
+    addLetter: '+ Magdagdag ng letra',
+    newLetter: 'Bagong letra',
+    editLetter: 'I-edit ang letra',
+    fieldLetter: 'Letra',
+    fieldSound: 'Tunog nito (hal. “sss”)',
+    fieldExamples: 'Mga halimbawang salita, hiwalay sa espasyo',
     fieldSentenceMeaningOptional: 'Pangungusap sa Ingles (opsyonal)',
     fieldMeaningOptional: 'Kahulugan sa Ingles (opsyonal)',
     title: 'Pamahalaan ang mga card',

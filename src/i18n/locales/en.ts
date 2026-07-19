@@ -35,7 +35,7 @@ export default {
   },
   home: {
     known: 'Words you know',
-    knownCards: 'Characters you know',
+    knownCards: 'Things you know',
     dailyStartCards: '▶︎ Today’s {count} cards',
     outOf: 'out of {total} {unit}',
     unitWords: 'sight words',
@@ -72,6 +72,9 @@ export default {
     },
   },
   session: {
+    says: 'says',
+    showSound: 'Show the sound',
+    hideSound: 'Hide the sound',
     shuffleAgain: 'Shuffle',
     showExample: 'Show an example',
     hideExample: 'Hide the example',
@@ -116,6 +119,17 @@ export default {
     focusMode: 'Big word mode',
     exitFocus: 'Close big word mode',
   },
+  round: {
+    title: '{count} cards done!',
+    roundNumber: 'Round {round}',
+    doneBlurb: 'You worked through all {count}.',
+    praisePerfect: 'Every one, first try.',
+    praiseStrong: 'Strong reading.',
+    praiseFair: 'Good effort — a few to practise again.',
+    praiseLow: 'These need more practice. Try them again.',
+    more: '{count} more',
+    stop: 'Stop here',
+  },
   review: {
     title: 'Tricky words',
     emptyTitle: 'No tricky words',
@@ -133,6 +147,7 @@ export default {
     title: '{level} practice',
   },
   quiz: {
+    whichLetter: 'Which letter makes this sound?',
     findWord: 'Find this word',
     whatMeaning: 'What does this mean?',
     questionOf: 'Question {current} of {total}',
@@ -251,6 +266,12 @@ export default {
     cancel: 'Cancel',
   },
   words: {
+    addLetter: '+ Add a letter',
+    newLetter: 'New letter',
+    editLetter: 'Edit letter',
+    fieldLetter: 'Letter',
+    fieldSound: 'Sound it makes (e.g. “sss”)',
+    fieldExamples: 'Example words, space separated',
     fieldSentenceMeaningOptional: 'Sentence in English (optional)',
     fieldMeaningOptional: 'English meaning (optional)',
     title: 'Manage cards',

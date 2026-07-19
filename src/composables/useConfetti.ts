@@ -24,7 +24,12 @@ const DRAG = 0.995
 export function useConfetti() {
   const settings = useSettingsStore()
 
-  function burst(count = 90) {
+  /**
+   * `zIndex` exists for celebrations that happen *underneath* something —
+   * the round-complete modal bursts confetti behind its own card, so the
+   * praise stays readable instead of being buried in paper.
+   */
+  function burst(count = 90, options: { zIndex?: number } = {}) {
     if (typeof document === 'undefined') return
     if (!settings.settings.confettiEnabled) return
     // A celebration is exactly the kind of motion reduce-motion users opt out of.
@@ -39,7 +44,7 @@ export function useConfetti() {
       width: '100%',
       height: '100%',
       pointerEvents: 'none',
-      zIndex: '9999',
+      zIndex: String(options.zIndex ?? 9999),
     } satisfies Partial<CSSStyleDeclaration>)
     document.body.appendChild(canvas)
 

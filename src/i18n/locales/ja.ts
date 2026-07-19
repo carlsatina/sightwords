@@ -35,7 +35,7 @@ const ja: typeof en = {
   },
   home: {
     known: 'おぼえたことば',
-    knownCards: 'おぼえたもじ',
+    knownCards: 'おぼえたもの',
     dailyStartCards: '▶︎ きょうの{count}まい',
     outOf: '{total}の{unit}のうち',
     unitWords: 'ことば',
@@ -79,6 +79,9 @@ const ja: typeof en = {
     },
   },
   session: {
+    says: 'おと：',
+    showSound: 'おとをみる',
+    hideSound: 'おとをかくす',
     shuffleAgain: 'シャッフル',
     showExample: 'れいをみる',
     hideExample: 'れいをかくす',
@@ -123,6 +126,17 @@ const ja: typeof en = {
     focusMode: 'おおきくみる',
     exitFocus: 'おおきいひょうじをとじる',
   },
+  round: {
+    title: '{count}まいおわりました！',
+    roundNumber: '{round}かいめ',
+    doneBlurb: '{count}まいぜんぶできました。',
+    praisePerfect: 'ぜんぶ いっかいめでせいかい。',
+    praiseStrong: 'よくよめました。',
+    praiseFair: 'よくがんばりました。いくつかもういちど。',
+    praiseLow: 'もうすこしれんしゅうしましょう。',
+    more: 'あと{count}まい',
+    stop: 'ここでおわる',
+  },
   review: {
     title: 'にがてなことば',
     emptyTitle: 'にがてなことばはありません',
@@ -141,6 +155,7 @@ const ja: typeof en = {
     title: '{level}のれんしゅう',
   },
   quiz: {
+    whichLetter: 'このおとをだすもじはどれですか。',
     findWord: 'このことばをさがしましょう',
     whatMeaning: 'これはどんないみですか。',
     questionOf: '{total}もんちゅう{current}もんめ',
@@ -259,6 +274,12 @@ const ja: typeof en = {
     cancel: 'やめる',
   },
   words: {
+    addLetter: '＋ もじをついか',
+    newLetter: 'あたらしいもじ',
+    editLetter: 'もじをへんしゅう',
+    fieldLetter: 'もじ',
+    fieldSound: 'おと（れい：「sss」）',
+    fieldExamples: 'れいのことば、スペースくぎり',
     fieldSentenceMeaningOptional: 'えいごのぶん（にゅうりょくしなくてもよい）',
     fieldMeaningOptional: 'えいごのいみ（にゅうりょくしなくてもよい）',
     title: 'カードのかんり',

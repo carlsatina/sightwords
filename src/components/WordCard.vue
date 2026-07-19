@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { AccentName, Card } from '@/types'
+import { useI18n } from 'vue-i18n'
+import { cardText, type AccentName, type Card } from '@/types'
 
 /**
  * The flash card face. Renders either a sight word with its sentence or a
@@ -22,6 +23,8 @@ const props = withDefaults(
   { accent: 'mint', stackDepth: 2, showDetail: false, size: 'lg' },
 )
 
+const { t } = useI18n()
+
 const RULES: Record<AccentName, string> = {
   mint: 'bg-mint',
   marigold: 'bg-marigold',
@@ -30,9 +33,7 @@ const RULES: Record<AccentName, string> = {
   ink: 'bg-ink dark:bg-paper',
 }
 
-const face = computed(() =>
-  props.card.kind === 'kanji' ? props.card.char : props.card.text,
-)
+const face = computed(() => cardText(props.card))
 
 /**
  * CJK glyphs and long Latin words want different break behaviour: `break-all`
@@ -113,6 +114,20 @@ const stack = computed(() =>
         </p>
         <p v-if="card.meaning" lang="en" class="text-sm font-semibold opacity-40">
           {{ card.meaning }}
+        </p>
+      </div>
+
+      <!-- Letter detail: the sound, then words that use it. -->
+      <div
+        v-else-if="showDetail && card.kind === 'letter'"
+        class="relative mt-6 flex max-w-md flex-col items-center gap-2"
+      >
+        <p class="text-xl">
+          <span class="opacity-45">{{ t('session.says') }}</span>
+          <span class="ml-2 font-semibold opacity-80">“{{ card.sound }}”</span>
+        </p>
+        <p class="font-[family-name:var(--font-word)] text-lg opacity-55">
+          {{ card.examples.join(' · ') }}
         </p>
       </div>
 

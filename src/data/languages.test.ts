@@ -67,11 +67,56 @@ describe.each(BUILT_IN_LANGUAGES.map((l) => [l.code, l] as const))(
   },
 )
 
-describe('English', () => {
-  it('covers Kinder through Grade 4', () => {
-    const english = byCode('en')
+describe('English phonics progression', () => {
+  const english = byCode('en')
+
+  it('runs letter sounds, then words of rising complexity, then tricky words', () => {
     expect(english.levels).toHaveLength(6)
-    expect(english.levels.at(-1)!.ageRange).toContain('Grade 4')
+    // Level 1 teaches sounds, not words — a different card kind entirely.
+    expect(english.levels[0].cards.every((c) => c.kind === 'letter')).toBe(true)
+    expect(english.levels.slice(1).every((l) => l.cards.every((c) => c.kind === 'word')))
+      .toBe(true)
+    expect(english.levels.at(-1)!.name).toBe('Tricky Words')
+  })
+
+  it('gives every letter a sound and example words', () => {
+    for (const card of english.levels[0].cards) {
+      if (card.kind !== 'letter') continue
+      expect(card.sound.trim(), card.letter).not.toBe('')
+      expect(card.examples.length, card.letter).toBeGreaterThan(0)
+    }
+  })
+
+  it('starts with the letters that build words soonest', () => {
+    // s a t p i n first, not a b c — those six combine into sat, tap, pin,
+    // nip, so a child reads real words after one group.
+    const first = english.levels[0].cards
+      .slice(0, 6)
+      .map((c) => (c.kind === 'letter' ? c.letter : ''))
+    expect(first).toEqual(['s', 'a', 't', 'p', 'i', 'n'])
+  })
+
+  it('teaches every example word with the letter it demonstrates', () => {
+    for (const card of english.levels[0].cards) {
+      if (card.kind !== 'letter') continue
+      for (const example of card.examples) {
+        expect(example.toLowerCase(), `${card.letter} → ${example}`).toContain(
+          card.letter.toLowerCase(),
+        )
+      }
+    }
+  })
+
+  it('keeps the tricky words genuinely irregular', () => {
+    // The point of level 6 is that these cannot be sounded out. If a plain CVC
+    // word drifted in here it belongs in level 2 instead.
+    const tricky = english.levels
+      .at(-1)!
+      .cards.map((c) => (c.kind === 'word' ? c.text : ''))
+    expect(tricky).toContain('said')
+    expect(tricky).toContain('was')
+    expect(tricky).toContain('one')
+    expect(tricky).not.toContain('cat')
   })
 
   it('puts every word inside its own sentence', () => {

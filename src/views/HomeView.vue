@@ -20,11 +20,17 @@ const streak = computed(() => progress.state.currentStreak)
 const totalInLanguage = computed(() => library.allCards.length)
 
 /**
- * Japanese levels hold characters rather than sight words, so every noun on
- * this screen that counts them has to follow the language — not just one of
- * them, or the hero reads "Words you know … out of 171 cards".
+ * Whether this language's deck is more than words.
+ *
+ * Japanese counts characters; English now opens with letter sounds before any
+ * whole word. Calling either of those "words" is wrong, so the noun follows
+ * the actual contents rather than being hardcoded per language — otherwise the
+ * hero reads "Words you know … out of 162 sight words" over a deck that starts
+ * with the letter s.
  */
-const countsCharacters = computed(() => settings.settings.language === 'ja')
+const countsCharacters = computed(() =>
+  library.allCards.some((card) => card.kind !== 'word'),
+)
 
 const unit = computed(() =>
   countsCharacters.value ? t('home.unitCards') : t('home.unitWords'),

@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useCardsStore } from '@/stores/cards'
 import { useProgressStore } from '@/stores/progress'
 import AppButton from '@/components/AppButton.vue'
-import type { Card, CardDraft, LevelId } from '@/types'
+import { cardText, type Card, type CardDraft, type LevelId } from '@/types'
 
 const library = useCardsStore()
 const progress = useProgressStore()
@@ -41,18 +41,24 @@ const fileInput = ref<HTMLInputElement | null>(null)
  * data, and mixing a sight word into a kanji level would give the quiz two
  * incompatible question shapes in one round.
  */
-const levelKind = computed<'word' | 'kanji'>(
+const levelKind = computed<'word' | 'letter' | 'kanji'>(
   () => activeLevel.value?.cards[0]?.kind ?? 'word',
 )
 
-/** Readings are edited as space-separated text; stored as arrays. */
+/** Readings and examples are edited as space-separated text; stored as arrays. */
 const onText = ref('')
 const kunText = ref('')
+const examplesText = ref('')
 
 function blankDraft(): CardDraft {
-  return levelKind.value === 'kanji'
-    ? { kind: 'kanji', char: '', on: [], kun: [], meaning: '' }
-    : { kind: 'word', text: '', sentence: '', meaning: '', sentenceMeaning: '' }
+  switch (levelKind.value) {
+    case 'kanji':
+      return { kind: 'kanji', char: '', on: [], kun: [], meaning: '' }
+    case 'letter':
+      return { kind: 'letter', letter: '', sound: '', examples: [] }
+    default:
+      return { kind: 'word', text: '', sentence: '', meaning: '', sentenceMeaning: '' }
+  }
 }
 
 function flash(message: string) {
@@ -65,6 +71,7 @@ function startAdd() {
   draft.value = blankDraft()
   onText.value = ''
   kunText.value = ''
+  examplesText.value = ''
   formError.value = ''
 }
 
@@ -72,7 +79,15 @@ function startEdit(card: Card) {
   editing.value = card.id
   formError.value = ''
 
-  if (card.kind === 'kanji') {
+  if (card.kind === 'letter') {
+    draft.value = {
+      kind: 'letter',
+      letter: card.letter,
+      sound: card.sound,
+      examples: [...card.examples],
+    }
+    examplesText.value = card.examples.join(' ')
+  } else if (card.kind === 'kanji') {
     draft.value = {
       kind: 'kanji',
       char: card.char,
@@ -112,7 +127,9 @@ function submit() {
           on: parseReadings(onText.value),
           kun: parseReadings(kunText.value),
         }
-      : draft.value
+      : draft.value.kind === 'letter'
+        ? { ...draft.value, examples: parseReadings(examplesText.value) }
+        : draft.value
 
   const problem =
     editing.value === 'new'
@@ -144,12 +161,13 @@ function remove(card: Card) {
   flash(t('words.removed', { text: cardFace(card) }))
 }
 
-function cardFace(card: Card): string {
-  return card.kind === 'kanji' ? card.char : card.text
-}
+const cardFace = cardText
 
 function cardDetail(card: Card): string {
-  if (card.kind !== 'kanji') {
+  if (card.kind === 'letter') {
+    return `“${card.sound}” — ${card.examples.join(', ')}`
+  }
+  if (card.kind === 'word') {
     return card.meaning ? `${card.sentence} — ${card.meaning}` : card.sentence
   }
   const readings = [...card.on, ...card.kun].join('・')
@@ -259,7 +277,13 @@ function confirmReset() {
           size="sm"
           @click="startAdd"
         >
-          {{ levelKind === 'kanji' ? t('words.addKanji') : t('words.addWord') }}
+          {{
+            levelKind === 'kanji'
+              ? t('words.addKanji')
+              : levelKind === 'letter'
+                ? t('words.addLetter')
+                : t('words.addWord')
+          }}
         </AppButton>
       </div>
 
@@ -274,10 +298,14 @@ function confirmReset() {
             editing === 'new'
               ? levelKind === 'kanji'
                 ? t('words.newKanji')
-                : t('words.newWord')
+                : levelKind === 'letter'
+                  ? t('words.newLetter')
+                  : t('words.newWord')
               : levelKind === 'kanji'
                 ? t('words.editKanji')
-                : t('words.editWord')
+                : levelKind === 'letter'
+                  ? t('words.editLetter')
+                  : t('words.editWord')
           }}
         </p>
 
@@ -333,6 +361,48 @@ function confirmReset() {
               />
             </label>
           </template>
+        </template>
+
+        <!-- Letter card fields -->
+        <template v-else-if="draft.kind === 'letter'">
+          <label class="block">
+            <span class="mb-1 block text-sm font-semibold opacity-70">
+              {{ t('words.fieldLetter') }}
+            </span>
+            <input
+              v-model="draft.letter"
+              type="text"
+              autocapitalize="none"
+              autocomplete="off"
+              class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] text-2xl font-bold dark:bg-night"
+            />
+          </label>
+
+          <label class="mt-3 block">
+            <span class="mb-1 block text-sm font-semibold opacity-70">
+              {{ t('words.fieldSound') }}
+            </span>
+            <input
+              v-model="draft.sound"
+              type="text"
+              autocapitalize="none"
+              autocomplete="off"
+              class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
+            />
+          </label>
+
+          <label class="mt-3 block">
+            <span class="mb-1 block text-sm font-semibold opacity-70">
+              {{ t('words.fieldExamples') }}
+            </span>
+            <input
+              v-model="examplesText"
+              type="text"
+              autocapitalize="none"
+              autocomplete="off"
+              class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
+            />
+          </label>
         </template>
 
         <!-- Kanji card fields -->

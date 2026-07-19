@@ -3,6 +3,8 @@ import FlashcardsView from './FlashcardsView.vue'
 import PracticeView from './PracticeView.vue'
 import QuizView from './QuizView.vue'
 import { useCardsStore } from '@/stores/cards'
+import { cardText } from '@/types'
+import { ROUND_SIZE } from '@/composables/useRounds'
 import { mountView, resetAppState } from '@/test/harness'
 import { installSpeechMock } from '@/test/speech'
 
@@ -39,16 +41,29 @@ describe('flash cards', () => {
     expect(new Set(firsts).size).toBeGreaterThan(1)
   })
 
-  it('still shows every card in the level, just reordered', async () => {
-    const wrapper = await mountView(FlashcardsView, { levelId: '1' })
+  it('deals a round rather than the whole level', async () => {
+    // A hundred-card level shown as one deck is a wall with no visible end;
+    // twenty is short enough to finish and long enough to be worth finishing.
+    const wrapper = await mountView(FlashcardsView, { levelId: '2' })
     await wrapper.vm.$nextTick()
 
-    const expected = useCardsStore()
-      .getLevel(1)!
-      .cards.map((c) => (c.kind === 'kanji' ? c.char : c.text))
+    const levelSize = useCardsStore().getLevel(2)!.cards.length
+    const roundSize = Math.min(ROUND_SIZE, levelSize)
 
-    // The progress bar's max reflects the deck the view actually holds.
-    expect(wrapper.text()).toContain(`of ${expected.length}`)
+    expect(wrapper.text()).toContain(`of ${roundSize}`)
+  })
+
+  it('draws the round from the level, not from thin air', async () => {
+    const wrapper = await mountView(FlashcardsView, { levelId: '2' })
+    await wrapper.vm.$nextTick()
+
+    const inLevel = new Set(useCardsStore().getLevel(2)!.cards.map((c) => cardText(c)))
+    const shown = wrapper
+      .find('[aria-label^="Hear the word"]')
+      .attributes('aria-label')!
+      .replace(/^Hear the word /, '')
+
+    expect(inLevel.has(shown)).toBe(true)
   })
 })
 
