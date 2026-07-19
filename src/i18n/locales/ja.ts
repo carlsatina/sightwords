@@ -79,6 +79,7 @@ const ja: typeof en = {
     },
   },
   session: {
+    shuffleAgain: 'シャッフル',
     showExample: 'れいをみる',
     hideExample: 'れいをかくす',
     keyboardTipNoAudio: 'ヒント：← → でカードをうごかせます。',

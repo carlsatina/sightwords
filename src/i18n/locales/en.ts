@@ -72,6 +72,7 @@ export default {
     },
   },
   session: {
+    shuffleAgain: 'Shuffle',
     showExample: 'Show an example',
     hideExample: 'Hide the example',
     keyboardTipNoAudio: 'Tip: use ← and → to move between cards.',

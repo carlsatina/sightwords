@@ -82,6 +82,7 @@ const fil: typeof en = {
     },
   },
   session: {
+    shuffleAgain: 'Haluin',
     showExample: 'Ipakita ang halimbawa',
     hideExample: 'Itago ang halimbawa',
     keyboardTipNoAudio: 'Tip: gamitin ang ← at → para lumipat.',

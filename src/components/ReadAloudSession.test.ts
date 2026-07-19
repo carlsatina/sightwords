@@ -19,14 +19,13 @@ beforeEach(() => {
   speech = installSpeechMock(['en-US'])
 })
 
-/** The first English level-1 card, which every case below works against. */
-function firstCard() {
-  return useCardsStore().getLevel(1)!.cards[0]
-}
-
-function firstCardText() {
-  const card = firstCard()
-  return card.kind === 'kanji' ? card.char : card.text
+/**
+ * The card currently on screen. Both modes shuffle their deck on arrival, so a
+ * test must read what is shown rather than assume the level's first entry.
+ */
+function shownCardText(wrapper: { find: (s: string) => { attributes: (a: string) => string | undefined } }) {
+  const label = wrapper.find('[aria-label^="Hear the word"]').attributes('aria-label')
+  return label?.replace(/^Hear the word /, '') ?? ''
 }
 
 async function mountSession() {
@@ -70,7 +69,7 @@ describe('automatic speech', () => {
     expect(hearIt).toBeDefined()
     await hearIt!.trigger('click')
 
-    expect(speech.texts()).toEqual([firstCardText()])
+    expect(speech.texts()).toEqual([shownCardText(wrapper)])
   })
 
   it('speaks on arrival once the parent turns auto-speak on', async () => {
@@ -89,7 +88,7 @@ describe('automatic speech', () => {
     const wrapper = await mountFlashcards()
     await wrapper.vm.$nextTick()
 
-    expect(speech.texts()).toEqual([firstCardText()])
+    expect(speech.texts()).toEqual([shownCardText(wrapper)])
   })
 
   it('never speaks when speech is switched off entirely', async () => {

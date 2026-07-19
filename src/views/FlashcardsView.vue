@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { shuffle } from '@/lib/random'
 import { useCardsStore } from '@/stores/cards'
 import { useSpeech } from '@/composables/useSpeech'
 import { useSettingsStore } from '@/stores/settings'
@@ -48,7 +49,34 @@ const showDetail = ref(false)
 /** Drives the slide direction so the card appears to come off the deck. */
 const direction = ref<1 | -1>(1)
 
-const cards = computed(() => level.value?.cards ?? [])
+/**
+ * Shuffled once per visit, so a child learns the card rather than its position
+ * in the deck — the third card being "blue" every single time is a cue they
+ * can lean on instead of reading.
+ *
+ * Snapshotted into a ref rather than computed on the fly: a computed would
+ * reshuffle whenever the library changed, teleporting the child to a different
+ * card mid-session.
+ */
+const cards = ref<Card[]>([])
+
+watch(
+  [() => props.levelId, () => library.language.code],
+  () => {
+    cards.value = level.value ? shuffle(level.value.cards) : []
+    index.value = 0
+    showDetail.value = false
+  },
+  { immediate: true },
+)
+
+/** Reshuffles the current level and starts again from the top. */
+function reshuffle() {
+  cards.value = shuffle(cards.value)
+  index.value = 0
+  showDetail.value = false
+  direction.value = 1
+}
 const current = computed(() => cards.value[index.value])
 const atStart = computed(() => index.value === 0)
 const atEnd = computed(() => index.value >= cards.value.length - 1)
@@ -186,6 +214,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       >
         {{ t('session.finishCheck') }}
       </AppButton>
+    </div>
+
+    <div class="mt-4 flex justify-center">
+      <!-- The deck is already shuffled on arrival; this is for a child who
+           wants another pass without leaving the level. -->
+      <button
+        type="button"
+        class="rounded-xl px-3 py-1.5 text-sm font-bold underline opacity-60 hover:opacity-100"
+        @click="reshuffle"
+      >
+        🔀 {{ t('session.shuffleAgain') }}
+      </button>
     </div>
 
     <div class="mt-6 flex justify-center">

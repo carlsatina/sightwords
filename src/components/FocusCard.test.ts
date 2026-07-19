@@ -47,6 +47,26 @@ function cardsOf(language: 'en' | 'fil' = 'en') {
   return level.cards
 }
 
+/**
+ * The card currently on screen. The deck is shuffled on arrival, so tests must
+ * read what is actually shown rather than assume the level's first entry.
+ */
+function shownCard(wrapper: ReturnType<typeof mountView> extends Promise<infer W> ? W : never) {
+  const label = wrapper
+    .find('[aria-label^="Hear the word"]')
+    .attributes('aria-label')!
+  return label.replace(/^Hear the word /, '')
+}
+
+/** The card matching what is on screen, for reading its sentence. */
+function shownCardData(
+  wrapper: Parameters<typeof shownCard>[0],
+  language: 'en' | 'fil' = 'en',
+) {
+  const face = shownCard(wrapper)
+  return cardsOf(language).find((c) => (c.kind === 'kanji' ? c.char : c.text) === face)!
+}
+
 function findByText(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper.findAll('button').find((b) => b.text().includes(text))
 }
@@ -69,7 +89,7 @@ describe('focus mode', () => {
     const dialog = await openFocus(wrapper)
 
     expect(dialog.exists()).toBe(true)
-    expect(dialog.text()).toContain(textOf(0))
+    expect(dialog.text()).toContain(shownCard(wrapper))
   })
 
   it('locks page scrolling while open and restores it on close', async () => {
@@ -92,23 +112,26 @@ describe('focus mode', () => {
     await dialog.trigger('touchmove', touch(201, 300))
     await dialog.trigger('touchend', touch(201, 300))
 
-    expect(speech.texts()).toEqual([textOf(0)])
+    expect(speech.texts()).toEqual([shownCard(wrapper)])
   })
 
   it('advances on a right-to-left swipe', async () => {
     const wrapper = await mountFlashcards()
     const dialog = await openFocus(wrapper)
+    const before = shownCard(wrapper)
     await dialog.trigger('touchstart', touch(320, 300))
     await dialog.trigger('touchmove', touch(120, 302))
     await dialog.trigger('touchend', touch(120, 302))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(1))
+    expect(shownCard(wrapper)).not.toBe(before)
   })
 
   it('goes back on a left-to-right swipe', async () => {
     const wrapper = await mountFlashcards()
     const dialog = await openFocus(wrapper)
+    const first = shownCard(wrapper)
+
     await dialog.trigger('touchstart', touch(320, 300))
     await dialog.trigger('touchmove', touch(120, 302))
     await dialog.trigger('touchend', touch(120, 302))
@@ -119,7 +142,7 @@ describe('focus mode', () => {
     await dialog.trigger('touchend', touch(320, 302))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(0))
+    expect(shownCard(wrapper)).toBe(first)
   })
 
   it('cannot swipe back past the first word', async () => {
@@ -141,9 +164,10 @@ describe('focus mode', () => {
     expect(dialog.find('[aria-label="Next card"]').exists()).toBe(true)
     expect(dialog.find('[aria-label="Previous card"]').exists()).toBe(true)
 
+    const before = shownCard(wrapper)
     await dialog.find('[aria-label="Next card"]').trigger('click')
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(1))
+    expect(shownCard(wrapper)).not.toBe(before)
   })
 })
 
@@ -173,13 +197,14 @@ describe('English keeps the bare screen', () => {
     await dialog.trigger('touchstart', touch(200, 300))
     await dialog.trigger('touchmove', touch(201, 300))
     await dialog.trigger('touchend', touch(201, 300))
-    expect(speech.texts()).toEqual([textOf(0)])
+    expect(speech.texts()).toEqual([shownCard(wrapper)])
 
+    const before = shownCard(wrapper)
     await dialog.trigger('touchstart', touch(320, 300))
     await dialog.trigger('touchmove', touch(120, 302))
     await dialog.trigger('touchend', touch(120, 302))
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(1))
+    expect(shownCard(wrapper)).not.toBe(before)
   })
 
   it('keeps the reveal for a language that needs it', async () => {
@@ -226,7 +251,7 @@ describe('focus mode controls', () => {
     await toggle!.trigger('click')
     await wrapper.vm.$nextTick()
 
-    const card = cardsOf('fil')[0]
+    const card = shownCardData(wrapper, 'fil')
     const sentence = card.kind === 'word' ? card.sentence : ''
     expect(wrapper.find('[role="dialog"]').text()).toContain(sentence)
     expect(
@@ -247,7 +272,7 @@ describe('focus mode controls', () => {
 
     await wrapper.find('[aria-label="Hear the sentence"]').trigger('click')
 
-    const card = cardsOf('fil')[0]
+    const card = shownCardData(wrapper, 'fil')
     expect(speech.texts()).toEqual([card.kind === 'word' ? card.sentence : ''])
   })
 
