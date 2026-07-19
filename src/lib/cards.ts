@@ -59,6 +59,42 @@ export function spokenDetail(card: Card): string | null {
 }
 
 /**
+ * Width of one Andika bold glyph as a fraction of the font size, taken as the
+ * worst case rather than the average — a word only has to overflow once to
+ * wrap, so the average is the wrong statistic.
+ *
+ * Measured in Chrome over every word in the shipped lists: a typical word runs
+ * near 0.58em per character, but m-heavy words push far higher ("mamamayan"
+ * 0.687, "mga" 0.684, "mo" 0.713). 0.72 clears all of them with a little room
+ * for a device that falls back to Comic Sans MS. The cost of the margin is
+ * that a long word renders slightly smaller than it strictly must.
+ */
+const GLYPH_ADVANCE = 0.72
+
+/**
+ * A `font-size` that keeps `face` on a single line.
+ *
+ * The flash card face must never wrap — a word broken across two lines is a
+ * different shape from the word a child is learning to recognise, and
+ * `break-all` split it mid-grapheme ("pagkakaibi / gan"). Filipino made this
+ * unavoidable: its levels are full of thirteen-character words where English
+ * sight words are three.
+ *
+ * Returns a CSS `min()` of the caller's own responsive size and the largest
+ * size that still fits the width, so short words are unaffected and only words
+ * long enough to overflow are scaled down. The width term is in `cqi`, so the
+ * element must sit inside an inline-size query container — the card itself,
+ * whose content box is exactly the space the word has to fill.
+ */
+export function faceFontSize(face: string, cap: string): string {
+  // Counted by code point: a combining mark or an astral glyph is one written
+  // character, and counting UTF-16 units would shrink the word for no reason.
+  const length = [...face].length
+  if (length === 0) return cap
+  return `min(${cap}, calc(100cqi / ${(length * GLYPH_ADVANCE).toFixed(2)}))`
+}
+
+/**
  * What "Hear it" should say for a card.
  *
  * A letter card is the reason this exists: the synthesiser handed `s` reads it

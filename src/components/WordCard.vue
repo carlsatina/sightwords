@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { cardText, type AccentName, type Card } from '@/types'
+import { faceFontSize } from '@/lib/cards'
 
 /**
  * The flash card face. Renders either a sight word with its sentence or a
@@ -36,11 +37,20 @@ const RULES: Record<AccentName, string> = {
 const face = computed(() => cardText(props.card))
 
 /**
- * CJK glyphs and long Latin words want different break behaviour: `break-all`
- * keeps a long English word inside the card, but applied to a single kanji it
- * does nothing useful and interferes with the character's own spacing.
+ * A kanji or kana card is a single glyph that always fits, and its advance
+ * width is nothing like a Latin letter's, so it keeps the plain responsive
+ * size rather than being measured against `faceFontSize`'s Latin metric.
  */
 const isCjk = computed(() => props.card.language === 'ja')
+
+/** The card's own responsive size, before the fit-to-width cap. */
+const sizeCap = computed(() =>
+  props.size === 'lg' ? 'clamp(3.5rem,15vw,8rem)' : 'clamp(2.5rem,10vw,4rem)',
+)
+
+const faceSize = computed(() =>
+  isCjk.value ? sizeCap.value : faceFontSize(face.value, sizeCap.value),
+)
 
 // Behind-cards alternate direction so the deck looks hand-stacked, not generated.
 const stack = computed(() =>
@@ -71,7 +81,7 @@ const stack = computed(() =>
     />
 
     <div
-      class="deck-card relative flex flex-col items-center justify-center px-6 text-center"
+      class="deck-card relative flex flex-col items-center justify-center px-6 text-center [container-type:inline-size]"
       :class="size === 'lg' ? 'min-h-[19rem] sm:min-h-[24rem]' : 'min-h-[14rem]'"
     >
       <!-- A ruled baseline, like handwriting practice paper. -->
@@ -82,13 +92,8 @@ const stack = computed(() =>
       />
 
       <p
-        class="relative font-[family-name:var(--font-word)] leading-none font-bold"
-        :class="[
-          isCjk ? 'break-normal' : 'break-all',
-          size === 'lg'
-            ? 'text-[clamp(3.5rem,15vw,8rem)]'
-            : 'text-[clamp(2.5rem,10vw,4rem)]',
-        ]"
+        class="relative font-[family-name:var(--font-word)] leading-none font-bold whitespace-nowrap"
+        :style="{ fontSize: faceSize }"
         :lang="card.language"
       >
         {{ face }}

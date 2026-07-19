@@ -155,6 +155,10 @@ function maybeSpeak() {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  // Focus mode binds these same keys on `window` and is the thing on screen,
+  // so it owns them while it is open. Without this both handlers run and every
+  // arrow press moves two cards, silently skipping half the deck.
+  if (focus.active.value) return
   if (event.key === 'ArrowRight') next()
   else if (event.key === 'ArrowLeft') previous()
   else if (event.key === ' ' || event.key === 'Enter') {
@@ -285,6 +289,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       :total="cards.length"
       @close="focus.exit()"
       @next="next"
+      @finish="next"
       @previous="previous"
       @speak="speakCurrent"
       @speak-detail="speakSentence"

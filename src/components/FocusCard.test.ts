@@ -62,6 +62,11 @@ function findByText(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper.findAll('button').find((b) => b.text().includes(text))
 }
 
+/** The overlay's own finish button, not the one in the view behind it. */
+function finishInDialog(dialog: ReturnType<ReturnType<typeof mount>['find']>) {
+  return dialog.findAll('button').find((b) => b.text().includes('Finish'))
+}
+
 async function openFocus(wrapper: ReturnType<typeof mount>) {
   await findByText(wrapper, 'Big word mode')!.trigger('click')
   await wrapper.vm.$nextTick()
@@ -310,6 +315,84 @@ describe('focus mode controls', () => {
     const classes = controlBar(wrapper).className
     expect(classes).toContain('focus-within:opacity-100')
     expect(classes).toContain('focus-within:pointer-events-auto')
+  })
+
+  /**
+   * The end of a round in focus mode. Both of these were real dead ends: the
+   * view underneath kept its own window key listener bound while the overlay
+   * was open, and the overlay offered nothing to press once the last card was
+   * reached — so a child on a tablet could only abandon the round.
+   */
+  describe('the end of a round', () => {
+    /** The overlay's own "3 / 20" counter, as numbers. */
+    function position(dialog: ReturnType<ReturnType<typeof mount>['find']>) {
+      const [at, total] = dialog.find('span').text().split('/').map((n) => Number(n.trim()))
+      return { at, total }
+    }
+
+    /** Steps to the last card of the round with the right arrow key. */
+    async function goToLastCard(
+      wrapper: ReturnType<typeof mount>,
+      dialog: ReturnType<ReturnType<typeof mount>['find']>,
+    ) {
+      const { total } = position(dialog)
+      for (let i = 0; i < total - 1; i++) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+        await wrapper.vm.$nextTick()
+      }
+      expect(position(dialog).at).toBe(total)
+      return total
+    }
+
+    it('advances one card per arrow press, not two', async () => {
+      const wrapper = await mountFlashcards()
+      const dialog = await openFocus(wrapper)
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+      await wrapper.vm.$nextTick()
+
+      // The view under the overlay binds the same key on `window`; if both
+      // handlers run, this lands on card 3 and half the deck is skipped.
+      expect(position(dialog).at).toBe(2)
+    })
+
+    it('offers a finish button on the last card, even in English', async () => {
+      // English hides the rest of the navigation in focus mode — this is the
+      // one control it must not hide.
+      const wrapper = await mountFlashcards()
+      const dialog = await openFocus(wrapper)
+      await goToLastCard(wrapper, dialog)
+
+      // Scoped to the overlay: the view underneath renders its own "Finish ✓"
+      // at the end of a round, and searching the whole wrapper finds that one
+      // whether or not focus mode has a button of its own.
+      expect(finishInDialog(dialog)).toBeDefined()
+      expect(dialog.find('[aria-label="Next card"]').exists()).toBe(false)
+    })
+
+    it('completes the round when that finish button is pressed', async () => {
+      const wrapper = await mountFlashcards()
+      const dialog = await openFocus(wrapper)
+      const total = await goToLastCard(wrapper, dialog)
+
+      await finishInDialog(dialog)!.trigger('click')
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.text()).toContain(`${total} cards done!`)
+    })
+
+    it('completes the round on a swipe past the last card', async () => {
+      const wrapper = await mountFlashcards()
+      const dialog = await openFocus(wrapper)
+      const total = await goToLastCard(wrapper, dialog)
+
+      await dialog.trigger('touchstart', touch(320, 300))
+      await dialog.trigger('touchmove', touch(120, 302))
+      await dialog.trigger('touchend', touch(120, 302))
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.text()).toContain(`${total} cards done!`)
+    })
   })
 
   it('closes when Escape is pressed', async () => {

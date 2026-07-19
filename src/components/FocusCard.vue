@@ -8,6 +8,7 @@ import {
   detailKind,
   detailLabelKeys,
   detailSpeakKey,
+  faceFontSize,
   spokenDetail,
 } from '@/lib/cards'
 
@@ -49,6 +50,8 @@ const emit = defineEmits<{
   close: []
   next: []
   previous: []
+  /** The last card has been passed — the caller decides what "done" means. */
+  finish: []
   speak: []
   speakDetail: []
   toggleDetail: []
@@ -59,6 +62,18 @@ const { t } = useI18n()
 
 /** The glyph this mode exists to show, whichever kind of card it came from. */
 const face = computed(() => cardText(props.card))
+
+/**
+ * Height matters as much as width here — see the template — so the cap keeps
+ * its `vh` term and `faceFontSize` only ever lowers it further to fit a long
+ * word on one line. A single CJK glyph is exempt: it always fits, and its
+ * advance width is nothing like a Latin letter's.
+ */
+const FOCUS_SIZE_CAP = 'clamp(2.5rem,min(22vw,38vh),16rem)'
+
+const faceSize = computed(() =>
+  props.card.language === 'ja' ? FOCUS_SIZE_CAP : faceFontSize(face.value, FOCUS_SIZE_CAP),
+)
 
 const container = ref<HTMLElement | null>(null)
 /** The tap hint earns its place only until the parent has tapped once. */
@@ -93,6 +108,22 @@ const hasDetail = computed(() => !minimal.value && kind.value !== null)
  */
 const showNavButtons = computed(() => props.navigable && !minimal.value)
 
+/**
+ * Sitting on the last card, with the round still to be closed out.
+ *
+ * This is the one control minimal mode does not get to hide. Without it the
+ * last card is a dead end for anyone not using a keyboard: there is nothing
+ * left to swipe to, the next button is disabled, and the only way out is the
+ * close button — which abandons the round rather than completing it.
+ */
+const atEnd = computed(() => props.navigable && !props.canNext)
+
+/** Moves on, or closes out the round when there is nothing left to move to. */
+function advance() {
+  if (props.canNext) emit('next')
+  else if (props.navigable) emit('finish')
+}
+
 const toggleLabelKey = computed(() => {
   if (!kind.value) return 'session.showSentence'
   const keys = detailLabelKeys(kind.value)
@@ -123,7 +154,7 @@ const { dragX, listeners } = useSwipe({
     hintVisible.value = false
     emit('speak')
   },
-  onSwipeLeft: () => props.navigable && props.canNext && emit('next'),
+  onSwipeLeft: () => props.navigable && advance(),
   onSwipeRight: () => props.navigable && props.canPrevious && emit('previous'),
 })
 
@@ -150,7 +181,7 @@ function onKeydown(event: KeyboardEvent) {
       emit('close')
       break
     case 'ArrowRight':
-      if (props.navigable && props.canNext) emit('next')
+      if (props.navigable) advance()
       break
     case 'ArrowLeft':
       if (props.navigable && props.canPrevious) emit('previous')
@@ -222,12 +253,15 @@ watch(
          The size is bounded by height as well as width: `22vw` alone ignores
          the viewport's height, so a landscape phone sized the word off the
          bottom of its own row and straight over the sentence below. -->
-    <div class="flex min-h-0 flex-1 items-center justify-center overflow-hidden px-4">
+    <div
+      class="flex min-h-0 flex-1 items-center justify-center overflow-hidden px-4 [container-type:inline-size]"
+    >
       <p
-        class="font-[family-name:var(--font-word)] leading-none font-bold text-[clamp(2.5rem,min(22vw,38vh),16rem)]"
-        :class="[ACCENT_TEXT[accent], card.language === 'ja' ? 'break-normal' : 'break-all']"
+        class="font-[family-name:var(--font-word)] leading-none font-bold whitespace-nowrap"
+        :class="ACCENT_TEXT[accent]"
         :lang="card.language"
         :style="{
+          fontSize: faceSize,
           transform: `translateX(${offset}px)`,
           transition: dragX === 0 ? 'transform 0.28s var(--ease-settle)' : 'none',
         }"
@@ -401,16 +435,26 @@ watch(
       </button>
 
       <button
-        v-if="showNavButtons"
+        v-if="showNavButtons && !atEnd"
         type="button"
         class="chunky-btn flex h-11 w-11 items-center justify-center bg-white text-ink shadow-[0_3px_0_0_rgba(30,42,71,0.15)] disabled:opacity-30 dark:bg-night-card dark:text-paper dark:shadow-[0_3px_0_0_rgba(0,0,0,0.5)]"
-        :disabled="!canNext"
         :aria-label="t('session.nextCard')"
         @click.stop="emit('next')"
       >
         <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="m9 18 6-6-6-6" />
         </svg>
+      </button>
+
+      <!-- Shown even where `minimal` hides the rest of the navigation: the end
+           of the round has to be reachable without a keyboard. -->
+      <button
+        v-if="atEnd"
+        type="button"
+        class="chunky-btn flex items-center gap-2 bg-mint px-4 py-2.5 text-sm font-bold text-white shadow-[0_3px_0_0_var(--color-mint-deep)]"
+        @click.stop="emit('finish')"
+      >
+        {{ t('session.finishCheck') }}
       </button>
     </div>
 
