@@ -24,6 +24,11 @@ export const FILIPINO: StoredLanguage = {
   endonym: 'Filipino',
   speechLang: 'fil-PH',
   /**
+   * Substitutes, used only when the device has no Filipino voice of its own.
+   * Android does ship one — though it may report itself as `tl-PH` rather than
+   * `fil-PH`, which `SUBTAG_ALIASES` in `useSpeech` reconciles — so on a phone
+   * with it installed none of the tags below are ever reached.
+   *
    * Most desktop browsers and iOS ship no fil-PH voice, so Spanish stands in.
    * It is a genuine approximation, not an equivalent: Filipino and Spanish are
    * both five-vowel and largely phonetic, which carries most words, but

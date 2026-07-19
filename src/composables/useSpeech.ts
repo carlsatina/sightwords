@@ -98,6 +98,26 @@ function primarySubtag(tag: string): string {
   return normaliseTag(tag).split('-')[0]!
 }
 
+/**
+ * Different codes that name the same language, mapped to the one this app
+ * uses. `tl` (Tagalog) and `fil` (Filipino) are not synonyms to a linguist —
+ * Filipino is the standardised national language built on Tagalog — but every
+ * text-to-speech engine that ships one ships it under both names, and Android
+ * is not consistent about which: newer builds report `fil-PH`, others still
+ * say `tl-PH` for the same installed voice.
+ *
+ * Matching `fil` alone meant a phone with Filipino genuinely installed was
+ * read to in Spanish, and the parent settings offered an empty voice picker to
+ * explain it.
+ */
+const SUBTAG_ALIASES: Record<string, string> = { tl: 'fil' }
+
+/** The subtag two tags must share to count as the same language. */
+function canonicalSubtag(tag: string): string {
+  const primary = primarySubtag(tag)
+  return SUBTAG_ALIASES[primary] ?? primary
+}
+
 export function useSpeech() {
   const settings = useSettingsStore()
   const cards = useCardsStore()
@@ -127,8 +147,8 @@ export function useSpeech() {
 
   /** Every installed voice that can read the given language. */
   function voicesFor(speechLang: string): SpeechSynthesisVoice[] {
-    const want = primarySubtag(speechLang)
-    return voices.value.filter((v) => primarySubtag(v.lang) === want)
+    const want = canonicalSubtag(speechLang)
+    return voices.value.filter((v) => canonicalSubtag(v.lang) === want)
   }
 
   function languageFor(code: LanguageCode | undefined): Language | undefined {

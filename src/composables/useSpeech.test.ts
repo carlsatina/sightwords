@@ -140,6 +140,31 @@ describe('language tags with underscores', () => {
     expect(spoken[0].voice).toBe('Paulina')
   })
 
+  it('uses an installed Tagalog-tagged voice as Filipino itself', () => {
+    // Android's text-to-speech engines label the Filipino voice inconsistently:
+    // newer builds report `fil-PH`, others still use the older Tagalog code
+    // `tl-PH` for the same voice. Matching on `fil` alone left a phone with
+    // Filipino installed being read to in Spanish.
+    currentVoices = [voice('Google Filipino', 'tl-PH'), voice('Paulina', 'es-MX')]
+    const speech = withSpeech()
+
+    expect(speech.hasVoiceFor('fil-PH')).toBe(true)
+    // Its own language, not a stand-in — so no "Spanish is reading" warning.
+    expect(speech.voiceStatusFor('fil')).toBe('exact')
+
+    useSettingsStore().setLanguage('fil')
+    speech.speak('bayanihan')
+    expect(spoken[0].voice).toBe('Google Filipino')
+  })
+
+  it('offers a tl-tagged voice in the Filipino voice picker', () => {
+    // The parent must be able to select it, not just have it chosen for them.
+    currentVoices = [voice('Google Filipino', 'tl_PH')]
+    const speech = withSpeech()
+
+    expect(speech.voicesFor('fil-PH').map((v) => v.name)).toEqual(['Google Filipino'])
+  })
+
   it('does not invent a match across different languages', () => {
     // Normalising must not become "match anything" — Japanese has no stand-in.
     currentVoices = [voice('Samantha', 'en_US')]
