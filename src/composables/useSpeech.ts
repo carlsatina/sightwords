@@ -30,8 +30,37 @@ let listenerAttached = false
  * later. It normally announces that with `voiceschanged`, but that event is
  * unreliable — if it never fires, the app would show no voices at all. Poll a
  * few times as a backstop, then give up rather than spin forever.
+ *
+ * iOS Safari is slower and stranger still: the list can stay empty until
+ * speech has actually been used once, which is why `primeOnInteraction` below
+ * re-reads it after the first touch.
  */
-const VOICE_RETRY_DELAYS = [100, 300, 700, 1500]
+const VOICE_RETRY_DELAYS = [100, 300, 700, 1500, 3000]
+
+/**
+ * Whether the browser has told us what it can speak.
+ *
+ * An empty list means "not yet", not "nothing" — the distinction matters more
+ * than it sounds. Treating the two the same hid every audio control on iOS,
+ * where the list is routinely empty at load, and told the parent that three
+ * languages had no voice installed when in fact all three worked.
+ */
+const voicesLoaded = computed(() => voices.value.length > 0)
+
+let primed = false
+
+/**
+ * Re-reads the voice list after the first user interaction. iOS populates it
+ * lazily and a gesture is the reliable trigger.
+ */
+function primeOnInteraction() {
+  if (primed || typeof window === 'undefined') return
+  primed = true
+  const reload = () => loadVoices()
+  window.addEventListener('pointerdown', reload, { once: true, passive: true })
+  window.addEventListener('touchstart', reload, { once: true, passive: true })
+  window.addEventListener('keydown', reload, { once: true })
+}
 
 function loadVoices(attempt = 0) {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
@@ -73,6 +102,7 @@ export function useSpeech() {
     // component opened later (the settings page, typically) must not be stuck
     // with whatever the list looked like when the app first booted.
     loadVoices()
+    primeOnInteraction()
 
     if (!listenerAttached) {
       listenerAttached = true
@@ -108,6 +138,13 @@ export function useSpeech() {
     status: 'exact' | 'substitute' | 'none'
   } {
     if (!language) return { voice: null, lang: 'en-US', status: 'none' }
+
+    // Nothing known yet. Assume the browser can manage and let it pick its own
+    // voice from the utterance's language tag — silently refusing here is what
+    // made the app appear mute on iOS.
+    if (!voicesLoaded.value) {
+      return { voice: null, lang: language.speechLang, status: 'exact' }
+    }
 
     const preferred = settings.voiceFor(language.code)
 
@@ -153,8 +190,16 @@ export function useSpeech() {
     return { voice: null, lang: language.speechLang, status: 'none' }
   }
 
-  /** Whether a language is read by its own voice, a stand-in, or not at all. */
-  function voiceStatusFor(code: LanguageCode): 'exact' | 'substitute' | 'none' {
+  /**
+   * Whether a language is read by its own voice, a stand-in, or not at all.
+   * Reports `unknown` while the browser has not yet said what it has, so the
+   * UI can say "still looking" rather than accusing the device of having no
+   * voices at all.
+   */
+  function voiceStatusFor(
+    code: LanguageCode,
+  ): 'exact' | 'substitute' | 'none' | 'unknown' {
+    if (!voicesLoaded.value) return 'unknown'
     return resolveFor(languageFor(code)).status
   }
 
@@ -170,11 +215,14 @@ export function useSpeech() {
    * offer a button that does nothing — a silent "Hear it" button reads to a
    * child as the app being broken.
    *
-   * Reported as false until the voice list has loaded, which keeps a button
-   * from flashing in and back out during the first moments after boot.
+   * Optimistic while the voice list is still unknown. Hiding the controls until
+   * the browser answers sounds safer, but on iOS the answer routinely never
+   * comes, and a permanently silent app is a worse failure than a button that
+   * occasionally does nothing.
    */
   function hasVoiceFor(speechLang: string): boolean {
     if (!supported) return false
+    if (!voicesLoaded.value) return true
     if (voicesFor(speechLang).length > 0) return true
 
     const language = cards.languages.find((l) => l.speechLang === speechLang)
@@ -195,9 +243,11 @@ export function useSpeech() {
       cards.languages.find((l) => l.speechLang === requested) ?? cards.language
     const { voice, lang } = resolveFor(language)
 
-    // Nothing to read it with, not even a stand-in. Staying silent beats
-    // handing the text to a voice that would mispronounce it wholesale.
-    if (!voice) return
+    // A known-empty result means the device really has nothing for this
+    // language, not even a stand-in; staying silent beats handing the text to a
+    // voice that would mispronounce it wholesale. An *unknown* result is
+    // different — speak anyway and let the browser choose.
+    if (!voice && voicesLoaded.value) return
 
     // Cancel any in-flight utterance so rapid card taps don't queue up a backlog.
     window.speechSynthesis.cancel()
@@ -206,7 +256,8 @@ export function useSpeech() {
     utterance.rate = options.rate ?? settings.settings.speechRate
     utterance.pitch = 1.1 // Slightly bright, reads as friendly rather than robotic.
     utterance.lang = lang
-    utterance.voice = voice
+    // Left unset when the list has not loaded, so the engine picks by `lang`.
+    if (voice) utterance.voice = voice
 
     utterance.onstart = () => (speaking.value = true)
     utterance.onend = () => (speaking.value = false)
@@ -224,6 +275,7 @@ export function useSpeech() {
   return {
     supported,
     voices,
+    voicesLoaded,
     speaking,
     currentLang,
     canSpeakCurrent,

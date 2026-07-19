@@ -377,7 +377,7 @@ function substituteName(code: LanguageCode): string {
               <select
                 class="w-full rounded-2xl bg-ink/5 p-3 font-semibold disabled:opacity-50 dark:bg-white/10"
                 :value="settings.voiceFor(l.code) ?? ''"
-                :disabled="!hasVoiceFor(l.speechLang)"
+                :disabled="sortedVoicesFor(l).length === 0"
                 @change="
                   chooseVoice(l.code, ($event.target as HTMLSelectElement).value)
                 "
@@ -407,8 +407,12 @@ function substituteName(code: LanguageCode): string {
                   })
                 }}
               </span>
+              <!-- Only accuse the device of lacking a voice once it has
+                   actually told us what it has. iOS reports nothing for a
+                   while, and saying "no voice installed" then is both wrong
+                   and alarming. -->
               <span
-                v-else-if="!hasVoiceFor(l.speechLang)"
+                v-else-if="voiceStatusFor(l.code) === 'none'"
                 class="mt-1 block text-xs font-semibold text-coral-deep dark:text-coral"
               >
                 {{ t('parent.voiceMissing', { language: l.name }) }}
