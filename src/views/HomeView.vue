@@ -1,17 +1,34 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useWordsStore } from '@/stores/words'
+import { useI18n } from 'vue-i18n'
+import { useCardsStore } from '@/stores/cards'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import ProgressBar from '@/components/ProgressBar.vue'
+import LanguagePicker from '@/components/LanguagePicker.vue'
 import type { AccentName } from '@/types'
 
-const library = useWordsStore()
+const library = useCardsStore()
 const progress = useProgressStore()
 const settings = useSettingsStore()
+const { t } = useI18n()
 
-const missedCount = computed(() => progress.missedWordIds.length)
+const missedCount = computed(() => progress.missedCardIds.length)
 const streak = computed(() => progress.state.currentStreak)
+
+/** Total across the language on screen, not across all of them. */
+const totalInLanguage = computed(() => library.allCards.length)
+
+/**
+ * Japanese levels hold characters rather than sight words, so every noun on
+ * this screen that counts them has to follow the language — not just one of
+ * them, or the hero reads "Words you know … out of 171 cards".
+ */
+const countsCharacters = computed(() => settings.settings.language === 'ja')
+
+const unit = computed(() =>
+  countsCharacters.value ? t('home.unitCards') : t('home.unitWords'),
+)
 
 const RING: Record<AccentName, string> = {
   mint: 'border-mint',
@@ -32,11 +49,16 @@ const CHIP: Record<AccentName, string> = {
 
 <template>
   <div class="pt-6">
+    <!-- The language switch sits above the hero rather than in settings: a
+         bilingual child picks their own language, and burying it behind the
+         parent gate would make switching an adult-only act. -->
+    <LanguagePicker class="mb-6" />
+
     <!-- Hero: the child's own word count is the most characteristic thing on
          this page, so it leads — set in the reading face, not the UI face. -->
     <section class="mb-8 text-center">
       <p class="text-sm font-bold tracking-[0.2em] uppercase opacity-50">
-        Words you know
+        {{ countsCharacters ? t('home.knownCards') : t('home.known') }}
       </p>
       <p
         class="my-1 font-[family-name:var(--font-word)] text-[clamp(4rem,20vw,8rem)] leading-none font-bold"
@@ -44,11 +66,15 @@ const CHIP: Record<AccentName, string> = {
         {{ progress.masteredCount }}
       </p>
       <p class="text-lg opacity-60">
-        out of {{ progress.levelSizes[1] + progress.levelSizes[2] + progress.levelSizes[3] + progress.levelSizes[4] + progress.levelSizes[5] }} sight words
+        {{ t('home.outOf', { total: totalInLanguage, unit }) }}
       </p>
 
       <div class="mx-auto mt-6 max-w-md">
-        <ProgressBar :value="progress.overallPercent" accent="marigold" :show-percent="false" />
+        <ProgressBar
+          :value="progress.overallPercent"
+          accent="marigold"
+          :show-percent="false"
+        />
       </div>
 
       <div class="mt-5 flex flex-wrap justify-center gap-2">
@@ -56,13 +82,19 @@ const CHIP: Record<AccentName, string> = {
           :to="{ name: 'daily' }"
           class="chunky-btn bg-marigold px-6 py-3 text-lg text-ink shadow-[0_5px_0_0_var(--color-marigold-deep)]"
         >
-          {{ progress.dailyComplete ? '✅ Daily practice done' : "▶︎ Today's 10 words" }}
+          {{
+            progress.dailyComplete
+              ? t('home.dailyDone')
+              : t(countsCharacters ? 'home.dailyStartCards' : 'home.dailyStart', {
+                  count: settings.settings.dailyGoal,
+                })
+          }}
         </RouterLink>
         <RouterLink
           :to="{ name: 'achievements' }"
           class="chunky-btn bg-white px-6 py-3 text-lg text-ink shadow-[0_5px_0_0_rgba(30,42,71,0.15)] dark:bg-night-card dark:text-paper dark:shadow-[0_5px_0_0_rgba(0,0,0,0.5)]"
         >
-          🏅 {{ progress.earnedBadgeCount }} badges
+          🏅 {{ t('home.badges', { count: progress.earnedBadgeCount }) }}
         </RouterLink>
       </div>
     </section>
@@ -76,15 +108,15 @@ const CHIP: Record<AccentName, string> = {
     >
       <span class="text-4xl" aria-hidden="true">🔁</span>
       <span>
-        <span class="block text-xl font-extrabold">Practise tricky words</span>
+        <span class="block text-xl font-extrabold">{{ t('home.trickyTitle') }}</span>
         <span class="block opacity-60">
-          {{ missedCount }} {{ missedCount === 1 ? 'word needs' : 'words need' }} another go
+          {{ t('home.trickyCount', missedCount) }}
         </span>
       </span>
       <span class="ml-auto text-2xl opacity-40" aria-hidden="true">→</span>
     </RouterLink>
 
-    <h2 class="mb-4 text-2xl font-extrabold">Choose a level</h2>
+    <h2 class="mb-4 text-2xl font-extrabold">{{ t('home.chooseLevel') }}</h2>
 
     <div class="grid gap-4 sm:grid-cols-2">
       <RouterLink
@@ -109,26 +141,40 @@ const CHIP: Record<AccentName, string> = {
             class="rounded-full px-2.5 py-0.5 text-xs font-extrabold tracking-wider uppercase"
             :class="CHIP[level.accent]"
           >
-            Level {{ level.id }}
+            {{ t('home.level', { id: level.id }) }}
           </span>
           <span class="text-xs font-semibold opacity-50">{{ level.ageRange }}</span>
-          <span v-if="!settings.isLevelUnlocked(level.id)" class="ml-auto" aria-hidden="true">🔒</span>
+          <span
+            v-if="!settings.isLevelUnlocked(level.id)"
+            class="ml-auto"
+            aria-hidden="true"
+            >🔒</span
+          >
         </div>
 
-        <p class="text-2xl font-extrabold">{{ level.name }}</p>
+        <!-- Level names are content, not chrome: a Japanese level is called
+             ひらがな whichever language the buttons are in. -->
+        <p class="text-2xl font-extrabold" :lang="settings.settings.language">
+          {{ level.name }}
+        </p>
         <p class="mb-4 text-sm opacity-60">{{ level.blurb }}</p>
 
         <ProgressBar
-          :value="progress.masteredByLevel[level.id]"
-          :max="level.words.length"
+          :value="progress.masteredByLevel[level.id] ?? 0"
+          :max="level.cards.length"
           :accent="level.accent"
-          :label="`${progress.masteredByLevel[level.id]} of ${level.words.length} words`"
+          :label="
+            t('home.levelProgress', {
+              done: progress.masteredByLevel[level.id] ?? 0,
+              total: level.cards.length,
+            })
+          "
         />
       </RouterLink>
     </div>
 
     <p v-if="streak > 0" class="mt-8 text-center text-lg font-semibold opacity-70">
-      🔥 {{ streak }}-day streak. Come back tomorrow to keep it going.
+      {{ t('home.streakNote', { count: streak }) }}
     </p>
   </div>
 </template>

@@ -1,47 +1,50 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { createRouter, createWebHistory } from 'vue-router'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { mount } from '@vue/test-utils'
 import FlashcardsView from '@/views/FlashcardsView.vue'
-import { useWordsStore } from '@/stores/words'
+import { useCardsStore } from '@/stores/cards'
+import { mountView, resetAppState } from '@/test/harness'
+import { installSpeechMock } from '@/test/speech'
 
-const spoken: string[] = []
+let speech: ReturnType<typeof installSpeechMock>
 
 beforeEach(() => {
-  localStorage.clear()
-  setActivePinia(createPinia())
-  spoken.length = 0
+  resetAppState()
   document.body.style.overflow = ''
-  ;(window as any).speechSynthesis = {
-    getVoices: () => [],
-    addEventListener: vi.fn(),
-    cancel: vi.fn(),
-    speak: (u: { text: string }) => spoken.push(u.text),
-  }
-  ;(window as any).SpeechSynthesisUtterance = class {
-    text: string
-    constructor(text: string) {
-      this.text = text
-    }
-  }
+  // A realistic desktop set. Filipino has no fil-PH voice here and falls back
+  // to Spanish, which is the situation its audio controls are designed around.
+  speech = installSpeechMock(['en-US', 'es-MX', 'ja-JP'])
 })
 
-async function mountFlashcards() {
-  const router = createRouter({
-    history: createWebHistory(),
-    routes: [
-      { path: '/', name: 'home', component: { template: '<div/>' } },
-      { path: '/level/:levelId', name: 'level', component: { template: '<div/>' } },
-    ],
-  })
-  await router.push('/')
-  await router.isReady()
-  const wrapper = mount(FlashcardsView, {
-    props: { levelId: '1' },
-    global: { plugins: [router] },
-  })
+/** English level-1 cards, which are all word cards. */
+function levelCards() {
+  return useCardsStore().getLevel(1)!.cards
+}
+
+function textOf(index: number) {
+  const card = levelCards()[index]
+  return card.kind === 'kanji' ? card.char : card.text
+}
+
+/**
+ * English deliberately has no reveal toggle or navigation buttons in focus
+ * mode, so any test about those controls has to use a language that keeps
+ * them. Filipino is the natural stand-in — same word-card shape, plus a
+ * translation worth revealing.
+ */
+async function mountFlashcards(language: 'en' | 'fil' = 'en') {
+  if (language !== 'en') {
+    const { useSettingsStore } = await import('@/stores/settings')
+    useSettingsStore().setLanguage(language)
+  }
+  const wrapper = await mountView(FlashcardsView, { levelId: '1' })
   await wrapper.vm.$nextTick()
   return wrapper
+}
+
+/** Cards of whichever language the test mounted. */
+function cardsOf(language: 'en' | 'fil' = 'en') {
+  const level = useCardsStore().levelsForLanguage(language)[0]
+  return level.cards
 }
 
 function findByText(wrapper: ReturnType<typeof mount>, text: string) {
@@ -66,8 +69,7 @@ describe('focus mode', () => {
     const dialog = await openFocus(wrapper)
 
     expect(dialog.exists()).toBe(true)
-    const firstWord = useWordsStore().getLevel(1)!.words[0].text
-    expect(dialog.text()).toContain(firstWord)
+    expect(dialog.text()).toContain(textOf(0))
   })
 
   it('locks page scrolling while open and restores it on close', async () => {
@@ -90,28 +92,23 @@ describe('focus mode', () => {
     await dialog.trigger('touchmove', touch(201, 300))
     await dialog.trigger('touchend', touch(201, 300))
 
-    const firstWord = useWordsStore().getLevel(1)!.words[0].text
-    expect(spoken).toEqual([firstWord])
+    expect(speech.texts()).toEqual([textOf(0)])
   })
 
   it('advances on a right-to-left swipe', async () => {
     const wrapper = await mountFlashcards()
     const dialog = await openFocus(wrapper)
-    const words = useWordsStore().getLevel(1)!.words
-
     await dialog.trigger('touchstart', touch(320, 300))
     await dialog.trigger('touchmove', touch(120, 302))
     await dialog.trigger('touchend', touch(120, 302))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[role="dialog"]').text()).toContain(words[1].text)
+    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(1))
   })
 
   it('goes back on a left-to-right swipe', async () => {
     const wrapper = await mountFlashcards()
     const dialog = await openFocus(wrapper)
-    const words = useWordsStore().getLevel(1)!.words
-
     await dialog.trigger('touchstart', touch(320, 300))
     await dialog.trigger('touchmove', touch(120, 302))
     await dialog.trigger('touchend', touch(120, 302))
@@ -122,45 +119,143 @@ describe('focus mode', () => {
     await dialog.trigger('touchend', touch(320, 302))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[role="dialog"]').text()).toContain(words[0].text)
+    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(0))
   })
 
   it('cannot swipe back past the first word', async () => {
     const wrapper = await mountFlashcards()
     const dialog = await openFocus(wrapper)
-    const words = useWordsStore().getLevel(1)!.words
-
     await dialog.trigger('touchstart', touch(120, 300))
     await dialog.trigger('touchmove', touch(320, 302))
     await dialog.trigger('touchend', touch(320, 302))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[role="dialog"]').text()).toContain(words[0].text)
+    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(0))
   })
 
   it('keeps navigation buttons in the page for keyboard users', async () => {
     // Swiping is unavailable on a keyboard, so the same jobs need real controls
     // even when they are visually hidden.
+    const wrapper = await mountFlashcards('fil')
+    const dialog = await openFocus(wrapper)
+    expect(dialog.find('[aria-label="Next card"]').exists()).toBe(true)
+    expect(dialog.find('[aria-label="Previous card"]').exists()).toBe(true)
+
+    await dialog.find('[aria-label="Next card"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(1))
+  })
+})
+
+describe('English keeps the bare screen', () => {
+  it('drops the reveal toggle and the navigation buttons', async () => {
+    // An English sentence under an English word is not a comprehension aid —
+    // it is more text competing with the one thing this mode exists to show.
     const wrapper = await mountFlashcards()
     const dialog = await openFocus(wrapper)
-    const words = useWordsStore().getLevel(1)!.words
 
-    expect(dialog.find('[aria-label="Next word"]').exists()).toBe(true)
-    expect(dialog.find('[aria-label="Previous word"]').exists()).toBe(true)
+    const labels = dialog
+      .findAll('button')
+      .map((b) => b.attributes('aria-label') ?? b.text().trim())
 
-    await dialog.find('[aria-label="Next word"]').trigger('click')
+    expect(labels.some((l) => /Show the sentence/.test(l))).toBe(false)
+    expect(dialog.find('[aria-label="Next card"]').exists()).toBe(false)
+    expect(dialog.find('[aria-label="Previous card"]').exists()).toBe(false)
+    // Hearing the word is the one thing that stays.
+    expect(dialog.find('[aria-label^="Hear the word"]').exists()).toBe(true)
+  })
+
+  it('still moves and speaks by gesture', async () => {
+    // Removing the buttons must not remove the behaviour behind them.
+    const wrapper = await mountFlashcards()
+    const dialog = await openFocus(wrapper)
+
+    await dialog.trigger('touchstart', touch(200, 300))
+    await dialog.trigger('touchmove', touch(201, 300))
+    await dialog.trigger('touchend', touch(201, 300))
+    expect(speech.texts()).toEqual([textOf(0)])
+
+    await dialog.trigger('touchstart', touch(320, 300))
+    await dialog.trigger('touchmove', touch(120, 302))
+    await dialog.trigger('touchend', touch(120, 302))
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('[role="dialog"]').text()).toContain(words[1].text)
+    expect(wrapper.find('[role="dialog"]').text()).toContain(textOf(1))
+  })
+
+  it('keeps the reveal for a language that needs it', async () => {
+    const wrapper = await mountFlashcards('fil')
+    const dialog = await openFocus(wrapper)
+
+    expect(dialog.find('[aria-label="Next card"]').exists()).toBe(true)
+    expect(
+      dialog.findAll('button').some((b) => b.text().includes('Show the sentence')),
+    ).toBe(true)
   })
 })
 
 describe('focus mode controls', () => {
   function controlBar(wrapper: ReturnType<typeof mount>) {
-    return wrapper.find('[aria-label="Next word"]').element.parentElement!
+    return wrapper.find('[aria-label="Next card"]').element.parentElement!
   }
 
-  it('hides the controls by default', async () => {
-    const wrapper = await mountFlashcards()
+  it('shows the controls by default', async () => {
+    // Reversed deliberately. They were hidden originally, on the theory that
+    // tapping and swiping covered the same jobs — but an invisible gesture is
+    // not a control, and nobody found them.
+    const wrapper = await mountFlashcards('fil')
+    await openFocus(wrapper)
+
+    const classes = controlBar(wrapper).className
+    expect(classes).not.toContain('opacity-0')
+    expect(classes).not.toContain('pointer-events-none')
+  })
+
+  it('offers a sentence toggle and a speaker for the sentence', async () => {
+    const wrapper = await mountFlashcards('fil')
+    const dialog = await openFocus(wrapper)
+
+    const toggle = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('Show the sentence'))
+    expect(toggle).toBeDefined()
+
+    // The sentence and its own speaker appear only once revealed — nothing
+    // shares the screen with the word until the child asks for it.
+    expect(dialog.find('[aria-label="Hear the sentence"]').exists()).toBe(false)
+
+    await toggle!.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const card = cardsOf('fil')[0]
+    const sentence = card.kind === 'word' ? card.sentence : ''
+    expect(wrapper.find('[role="dialog"]').text()).toContain(sentence)
+    expect(
+      wrapper.find('[role="dialog"]').find('[aria-label="Hear the sentence"]').exists(),
+    ).toBe(true)
+  })
+
+  it('reads the sentence, not the word, from the sentence speaker', async () => {
+    const wrapper = await mountFlashcards('fil')
+    await openFocus(wrapper)
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('Show the sentence'))!
+      .trigger('click')
+    await wrapper.vm.$nextTick()
+    speech.spoken.length = 0
+
+    await wrapper.find('[aria-label="Hear the sentence"]').trigger('click')
+
+    const card = cardsOf('fil')[0]
+    expect(speech.texts()).toEqual([card.kind === 'word' ? card.sentence : ''])
+  })
+
+  it('hides the controls when a parent turns them off', async () => {
+    const { useSettingsStore } = await import('@/stores/settings')
+    useSettingsStore().update('showFocusControls', false)
+
+    const wrapper = await mountFlashcards('fil')
     await openFocus(wrapper)
 
     const classes = controlBar(wrapper).className
@@ -183,20 +278,13 @@ describe('focus mode controls', () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
-  it('reveals the controls when a parent turns them on', async () => {
-    const { useSettingsStore } = await import('@/stores/settings')
-    useSettingsStore().update('showFocusControls', true)
-
-    const wrapper = await mountFlashcards()
-    await openFocus(wrapper)
-
-    const classes = controlBar(wrapper).className
-    expect(classes).not.toContain('opacity-0')
-    expect(classes).not.toContain('pointer-events-none')
-  })
-
   it('brings hidden controls back on keyboard focus', async () => {
-    const wrapper = await mountFlashcards()
+    // Tabbing to a control you cannot see is the same trap in reverse, so the
+    // hidden state has to yield to keyboard focus.
+    const { useSettingsStore } = await import('@/stores/settings')
+    useSettingsStore().update('showFocusControls', false)
+
+    const wrapper = await mountFlashcards('fil')
     await openFocus(wrapper)
 
     const classes = controlBar(wrapper).className

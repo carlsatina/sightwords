@@ -1,26 +1,33 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useProgressStore } from '@/stores/progress'
 import ProgressBar from '@/components/ProgressBar.vue'
 
 const progress = useProgressStore()
+const { t } = useI18n()
 
 const earned = computed(() => progress.badges.filter((b) => b.earned))
 const locked = computed(() => progress.badges.filter((b) => !b.earned))
 
 const STATS = computed(() => [
-  { label: 'Words mastered', value: progress.masteredCount, emoji: '📖' },
-  { label: 'Day streak', value: progress.state.currentStreak, emoji: '🔥' },
-  { label: 'Best streak', value: progress.state.longestStreak, emoji: '🏔️' },
-  { label: 'Accuracy', value: `${progress.accuracy}%`, emoji: '🎯' },
+  { key: 'statMastered', value: progress.masteredCount, emoji: '📖' },
+  { key: 'statStreak', value: progress.state.currentStreak, emoji: '🔥' },
+  { key: 'statBest', value: progress.state.longestStreak, emoji: '🏔️' },
+  { key: 'statAccuracy', value: `${progress.accuracy}%`, emoji: '🎯' },
 ])
 </script>
 
 <template>
   <div class="pt-6">
-    <h1 class="text-4xl font-extrabold">Achievements</h1>
+    <h1 class="text-4xl font-extrabold">{{ t('achievements.title') }}</h1>
     <p class="mt-1 opacity-60">
-      {{ earned.length }} of {{ progress.badges.length }} badges earned
+      {{
+        t('achievements.earned', {
+          count: earned.length,
+          total: progress.badges.length,
+        })
+      }}
     </p>
 
     <div class="mt-5 max-w-md">
@@ -33,17 +40,21 @@ const STATS = computed(() => [
     </div>
 
     <div class="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <div v-for="stat in STATS" :key="stat.label" class="deck-card p-4 text-center">
+      <div v-for="stat in STATS" :key="stat.key" class="deck-card p-4 text-center">
         <p class="text-3xl" aria-hidden="true">{{ stat.emoji }}</p>
         <p class="mt-1 font-[family-name:var(--font-word)] text-3xl font-bold tabular-nums">
           {{ stat.value }}
         </p>
-        <p class="text-xs font-semibold opacity-55">{{ stat.label }}</p>
+        <p class="text-xs font-semibold opacity-55">
+          {{ t(`achievements.${stat.key}`) }}
+        </p>
       </div>
     </div>
 
     <template v-if="earned.length">
-      <h2 class="mt-10 mb-3 text-2xl font-extrabold">Earned</h2>
+      <h2 class="mt-10 mb-3 text-2xl font-extrabold">
+        {{ t('achievements.earnedHeading') }}
+      </h2>
       <div class="grid gap-3 sm:grid-cols-2">
         <div
           v-for="badge in earned"
@@ -52,15 +63,21 @@ const STATS = computed(() => [
         >
           <span class="text-4xl" aria-hidden="true">{{ badge.emoji }}</span>
           <span>
-            <span class="block text-lg font-extrabold">{{ badge.name }}</span>
-            <span class="block text-sm opacity-60">{{ badge.description }}</span>
+            <span class="block text-lg font-extrabold">
+              {{ t(`badges.${badge.id}.name`) }}
+            </span>
+            <span class="block text-sm opacity-60">
+              {{ t(`badges.${badge.id}.description`) }}
+            </span>
           </span>
         </div>
       </div>
     </template>
 
-    <h2 class="mt-10 mb-3 text-2xl font-extrabold">Still to earn</h2>
-    <p v-if="!locked.length" class="opacity-60">Every badge earned. Remarkable.</p>
+    <h2 class="mt-10 mb-3 text-2xl font-extrabold">
+      {{ t('achievements.lockedHeading') }}
+    </h2>
+    <p v-if="!locked.length" class="opacity-60">{{ t('achievements.allEarned') }}</p>
     <div v-else class="grid gap-3 sm:grid-cols-2">
       <div
         v-for="badge in locked"
@@ -69,8 +86,12 @@ const STATS = computed(() => [
       >
         <span class="text-4xl grayscale" aria-hidden="true">{{ badge.emoji }}</span>
         <span>
-          <span class="block text-lg font-extrabold">{{ badge.name }}</span>
-          <span class="block text-sm opacity-70">{{ badge.description }}</span>
+          <span class="block text-lg font-extrabold">
+            {{ t(`badges.${badge.id}.name`) }}
+          </span>
+          <span class="block text-sm opacity-70">
+            {{ t(`badges.${badge.id}.description`) }}
+          </span>
         </span>
       </div>
     </div>

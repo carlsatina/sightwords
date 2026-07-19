@@ -1,11 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { createRouter, createWebHistory } from 'vue-router'
+import { beforeEach, describe, expect, it } from 'vitest'
 import ReadAloudSession from './ReadAloudSession.vue'
 import FlashcardsView from '@/views/FlashcardsView.vue'
 import { useSettingsStore } from '@/stores/settings'
-import { getLevel } from '@/data/words'
+import { useCardsStore } from '@/stores/cards'
+import { mountView, resetAppState } from '@/test/harness'
+import { installSpeechMock } from '@/test/speech'
 
 /**
  * Auto-speech must stay opt-in. In Practice the child is asked to read the word
@@ -13,67 +12,43 @@ import { getLevel } from '@/data/words'
  * quietly undo the point of the mode.
  */
 
-const spoken: string[] = []
+let speech: ReturnType<typeof installSpeechMock>
 
 beforeEach(() => {
-  localStorage.clear()
-  setActivePinia(createPinia())
-  spoken.length = 0
-  ;(window as any).speechSynthesis = {
-    getVoices: () => [],
-    addEventListener: vi.fn(),
-    cancel: vi.fn(),
-    speak: (u: { text: string }) => spoken.push(u.text),
-  }
-  ;(window as any).SpeechSynthesisUtterance = class {
-    text: string
-    constructor(text: string) {
-      this.text = text
-    }
-  }
+  resetAppState()
+  speech = installSpeechMock(['en-US'])
 })
 
-function makeRouter() {
-  return createRouter({
-    history: createWebHistory(),
-    routes: [
-      { path: '/', name: 'home', component: { template: '<div/>' } },
-      { path: '/level/:levelId', name: 'level', component: { template: '<div/>' } },
-    ],
-  })
+/** The first English level-1 card, which every case below works against. */
+function firstCard() {
+  return useCardsStore().getLevel(1)!.cards[0]
+}
+
+function firstCardText() {
+  const card = firstCard()
+  return card.kind === 'kanji' ? card.char : card.text
 }
 
 async function mountSession() {
-  const router = makeRouter()
-  await router.push('/')
-  await router.isReady()
-  return mount(ReadAloudSession, {
-    props: { words: getLevel(1)!.words.slice(0, 3), mode: 'practice', title: 'Test' },
-    global: { plugins: [router] },
-  })
+  const cards = useCardsStore().getLevel(1)!.cards.slice(0, 3)
+  return mountView(ReadAloudSession, { cards, mode: 'practice', title: 'Test' })
 }
 
 async function mountFlashcards() {
-  const router = makeRouter()
-  await router.push('/')
-  await router.isReady()
-  return mount(FlashcardsView, {
-    props: { levelId: '1' },
-    global: { plugins: [router] },
-  })
+  return mountView(FlashcardsView, { levelId: '1' })
 }
 
 describe('automatic speech', () => {
   it('stays silent when a practice card appears', async () => {
     const wrapper = await mountSession()
     await wrapper.vm.$nextTick()
-    expect(spoken).toEqual([])
+    expect(speech.texts()).toEqual([])
   })
 
   it('stays silent when a flash card appears', async () => {
     const wrapper = await mountFlashcards()
     await wrapper.vm.$nextTick()
-    expect(spoken).toEqual([])
+    expect(speech.texts()).toEqual([])
   })
 
   it('stays silent when moving to the next flash card', async () => {
@@ -84,7 +59,7 @@ describe('automatic speech', () => {
     await next!.trigger('click')
     await wrapper.vm.$nextTick()
 
-    expect(spoken).toEqual([])
+    expect(speech.texts()).toEqual([])
   })
 
   it('speaks when the parent presses Hear it', async () => {
@@ -95,7 +70,7 @@ describe('automatic speech', () => {
     expect(hearIt).toBeDefined()
     await hearIt!.trigger('click')
 
-    expect(spoken).toEqual([getLevel(1)!.words[0].text])
+    expect(speech.texts()).toEqual([firstCardText()])
   })
 
   it('speaks on arrival once the parent turns auto-speak on', async () => {
@@ -104,7 +79,7 @@ describe('automatic speech', () => {
     const wrapper = await mountSession()
     await wrapper.vm.$nextTick()
 
-    expect(spoken).toHaveLength(1)
+    expect(speech.texts()).toHaveLength(1)
   })
 
   it('speaks the very first flash card too when auto-speak is on', async () => {
@@ -114,7 +89,7 @@ describe('automatic speech', () => {
     const wrapper = await mountFlashcards()
     await wrapper.vm.$nextTick()
 
-    expect(spoken).toEqual([getLevel(1)!.words[0].text])
+    expect(speech.texts()).toEqual([firstCardText()])
   })
 
   it('never speaks when speech is switched off entirely', async () => {
@@ -125,6 +100,6 @@ describe('automatic speech', () => {
     const wrapper = await mountSession()
     await wrapper.vm.$nextTick()
 
-    expect(spoken).toEqual([])
+    expect(speech.texts()).toEqual([])
   })
 })

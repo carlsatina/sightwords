@@ -3,22 +3,23 @@ import { computed, ref, watch } from 'vue'
 import type {
   AnswerEvent,
   Badge,
+  CardProgress,
   DailySession,
   LevelId,
   PracticeMode,
-  WordProgress,
 } from '@/types'
-import { useWordsStore } from '@/stores/words'
+import { useCardsStore } from '@/stores/cards'
 import { BADGE_DEFINITIONS, type BadgeStats } from '@/data/badges'
 import { STORAGE_KEYS, load, remove, save } from '@/lib/storage'
 import { daysBetween, todayKey } from '@/lib/dates'
+import { migrateIdList, migrateProgressIds } from '@/lib/library'
 import { sample } from '@/lib/random'
 
 /** Consecutive correct answers before a word counts as known. */
 export const MASTERY_STREAK = 3
 
 interface ProgressState {
-  words: Record<string, WordProgress>
+  cards: Record<string, CardProgress>
   /** Badge id → ISO timestamp it was earned. */
   earnedBadges: Record<string, string>
   currentStreak: number
@@ -37,7 +38,7 @@ interface ProgressState {
  */
 function createEmptyState(): ProgressState {
   return {
-    words: {},
+    cards: {},
     earnedBadges: {},
     currentStreak: 0,
     longestStreak: 0,
@@ -52,58 +53,106 @@ function createEmptyState(): ProgressState {
 const MAX_RECENT_ANSWERS = 100
 
 export const useProgressStore = defineStore('progress', () => {
-  const words = useWordsStore()
+  const cards = useCardsStore()
 
-  const state = ref<ProgressState>({
-    ...createEmptyState(),
-    ...load<Partial<ProgressState>>(STORAGE_KEYS.progress, {}),
-  })
+  // Saved progress from before the app spoke more than one language keys words
+  // by bare text ("jump"); v2 keys them by language ("en:jump"). Rewriting on
+  // load is what keeps an existing child's streaks and mastery intact through
+  // the upgrade.
+  const state = ref<ProgressState>(hydrateState())
 
-  const daily = ref<DailySession | null>(
-    load<DailySession | null>(STORAGE_KEYS.daily, null),
-  )
+  function hydrateState(): ProgressState {
+    const stored = load<Partial<ProgressState> & { words?: Record<string, object> }>(
+      STORAGE_KEYS.progress,
+      {},
+    )
+    const { words: legacy, ...rest } = stored
+    const raw = stored.cards ?? legacy ?? {}
+
+    return {
+      ...createEmptyState(),
+      ...rest,
+      cards: migrateProgressIds(raw) as Record<string, CardProgress>,
+      recentAnswers: (stored.recentAnswers ?? []).map((answer) => {
+        const legacyId = (answer as AnswerEvent & { wordId?: string }).wordId
+        const id = answer.cardId ?? legacyId ?? ''
+        return { ...answer, cardId: id.includes(':') ? id : `en:${id.toLowerCase()}` }
+      }),
+    }
+  }
+
+  const daily = ref<DailySession | null>(hydrateDaily())
+
+  function hydrateDaily(): DailySession | null {
+    const stored = load<
+      (DailySession & { wordIds?: string[]; completedWordIds?: string[] }) | null
+    >(STORAGE_KEYS.daily, null)
+    if (!stored) return null
+
+    return {
+      date: stored.date,
+      cardIds: migrateIdList(stored.cardIds ?? stored.wordIds ?? []),
+      completedCardIds: migrateIdList(
+        stored.completedCardIds ?? stored.completedWordIds ?? [],
+      ),
+    }
+  }
 
   /** Badges newly earned since the last time the UI drained this queue. */
   const pendingBadges = ref<Badge[]>([])
 
   // --- Derived ------------------------------------------------------------
 
-  const wordProgress = computed(() => state.value.words)
+  const cardProgress = computed(() => state.value.cards)
 
   /**
-   * Progress entries for words that are still in the library. A parent can
-   * delete a word at any time; its old score must stop counting towards
-   * mastery, review, and totals rather than haunting them as a phantom.
+   * Progress entries for cards that are still in the library, across every
+   * language. A parent can delete a card at any time; its old score must stop
+   * counting towards mastery, review, and totals rather than haunting them as
+   * a phantom.
+   *
+   * Deliberately global: practice in any language feeds one streak, one daily
+   * goal, and one badge shelf. A bilingual child is doing more work, not two
+   * separate smaller amounts of it, and splitting the rewards would punish
+   * them for it.
    */
-  const liveEntries = computed(() =>
-    Object.values(state.value.words).filter((w) => words.allIds.has(w.wordId)),
-  )
+  const liveEntries = computed(() => {
+    const live = new Set(cards.everyCard.map((c) => c.id))
+    return Object.values(state.value.cards).filter((c) => live.has(c.cardId))
+  })
 
   const masteredIds = computed(
     () =>
       new Set(
         liveEntries.value
-          .filter((w) => w.streak >= MASTERY_STREAK)
-          .map((w) => w.wordId),
+          .filter((c) => c.streak >= MASTERY_STREAK)
+          .map((c) => c.cardId),
       ),
   )
 
   const masteredCount = computed(() => masteredIds.value.size)
 
-  /** Words answered incorrectly more recently than they were mastered. */
-  const missedWordIds = computed(() =>
+  /**
+   * Cards answered incorrectly more recently than they were mastered, in the
+   * language being practised — Review is a practice mode, so it must not hand
+   * a child Japanese kanji in the middle of an English session.
+   */
+  const missedCardIds = computed(() =>
     liveEntries.value
-      .filter((w) => w.incorrect > 0 && w.streak < MASTERY_STREAK)
+      .filter(
+        (c) =>
+          c.incorrect > 0 && c.streak < MASTERY_STREAK && cards.allIds.has(c.cardId),
+      )
       .sort((a, b) => b.incorrect - a.incorrect)
-      .map((w) => w.wordId),
+      .map((c) => c.cardId),
   )
 
   const totalCorrect = computed(() =>
-    liveEntries.value.reduce((sum, w) => sum + w.correct, 0),
+    liveEntries.value.reduce((sum, c) => sum + c.correct, 0),
   )
 
   const totalAttempts = computed(() =>
-    liveEntries.value.reduce((sum, w) => sum + w.correct + w.incorrect, 0),
+    liveEntries.value.reduce((sum, c) => sum + c.correct + c.incorrect, 0),
   )
 
   const accuracy = computed(() =>
@@ -112,32 +161,36 @@ export const useProgressStore = defineStore('progress', () => {
       : Math.round((totalCorrect.value / totalAttempts.value) * 100),
   )
 
+  // Level stats are scoped to the language on screen: level 1 means something
+  // different in each language, so summing them would be meaningless.
   const masteredByLevel = computed(() => {
     const result = {} as Record<LevelId, number>
-    for (const level of words.levels) {
-      result[level.id] = level.words.filter((w) =>
-        masteredIds.value.has(w.id),
-      ).length
+    for (const level of cards.levels) {
+      result[level.id] = level.cards.filter((c) => masteredIds.value.has(c.id)).length
     }
     return result
   })
 
   const levelSizes = computed(() => {
     const result = {} as Record<LevelId, number>
-    for (const level of words.levels) result[level.id] = level.words.length
+    for (const level of cards.levels) result[level.id] = level.cards.length
     return result
   })
 
   function levelPercent(levelId: LevelId): number {
     const size = levelSizes.value[levelId]
-    return size === 0 ? 0 : Math.round((masteredByLevel.value[levelId] / size) * 100)
+    return size === undefined || size === 0
+      ? 0
+      : Math.round((masteredByLevel.value[levelId] / size) * 100)
   }
 
-  const overallPercent = computed(() =>
-    words.allWords.length === 0
-      ? 0
-      : Math.round((masteredCount.value / words.allWords.length) * 100),
-  )
+  /** Progress through the language currently being practised. */
+  const overallPercent = computed(() => {
+    const total = cards.allCards.length
+    if (total === 0) return 0
+    const mastered = cards.allCards.filter((c) => masteredIds.value.has(c.id)).length
+    return Math.round((mastered / total) * 100)
+  })
 
   const badgeStats = computed<BadgeStats>(() => ({
     masteredCount: masteredCount.value,
@@ -153,8 +206,6 @@ export const useProgressStore = defineStore('progress', () => {
   const badges = computed<Badge[]>(() =>
     BADGE_DEFINITIONS.map((def) => ({
       id: def.id,
-      name: def.name,
-      description: def.description,
       emoji: def.emoji,
       earned: Boolean(state.value.earnedBadges[def.id]),
       earnedAt: state.value.earnedBadges[def.id],
@@ -186,12 +237,12 @@ export const useProgressStore = defineStore('progress', () => {
     )
   }
 
-  function recordAnswer(wordId: string, correct: boolean, mode: PracticeMode) {
+  function recordAnswer(cardId: string, correct: boolean, mode: PracticeMode) {
     const now = new Date().toISOString()
-    const existing = state.value.words[wordId]
-    const entry: WordProgress = existing
+    const existing = state.value.cards[cardId]
+    const entry: CardProgress = existing
       ? { ...existing }
-      : { wordId, correct: 0, incorrect: 0, lastSeen: now, streak: 0 }
+      : { cardId, correct: 0, incorrect: 0, lastSeen: now, streak: 0 }
 
     if (correct) {
       entry.correct += 1
@@ -202,16 +253,16 @@ export const useProgressStore = defineStore('progress', () => {
       entry.streak = 0
     }
     entry.lastSeen = now
-    state.value.words[wordId] = entry
+    state.value.cards[cardId] = entry
 
     state.value.recentAnswers = [
-      { wordId, correct, mode, at: now },
+      { cardId, correct, mode, at: now },
       ...state.value.recentAnswers,
     ].slice(0, MAX_RECENT_ANSWERS)
 
     touchStreak()
 
-    if (mode === 'daily') markDailyWordDone(wordId)
+    if (mode === 'daily') markDailyCardDone(cardId)
 
     checkBadges()
   }
@@ -233,8 +284,6 @@ export const useProgressStore = defineStore('progress', () => {
       state.value.earnedBadges[def.id] = earnedAt
       pendingBadges.value.push({
         id: def.id,
-        name: def.name,
-        description: def.description,
         emoji: def.emoji,
         earned: true,
         earnedAt,
@@ -258,32 +307,34 @@ export const useProgressStore = defineStore('progress', () => {
     const today = todayKey()
     if (daily.value?.date === today) return daily.value
 
-    const pool = words.allWords.filter((w) => allowedLevels.includes(w.levelId))
-    // Prefer words that aren't mastered yet; top up with mastered ones so the
+    // Drawn from the current language only — a daily set mixing scripts would
+    // ask a child to switch languages card to card.
+    const pool = cards.allCards.filter((c) => allowedLevels.includes(c.levelId))
+    // Prefer cards that aren't mastered yet; top up with mastered ones so the
     // set is always full even for a child who has learned nearly everything.
-    const unmastered = pool.filter((w) => !masteredIds.value.has(w.id))
+    const unmastered = pool.filter((c) => !masteredIds.value.has(c.id))
     const chosen = sample(unmastered, size)
     if (chosen.length < size) {
-      const rest = pool.filter((w) => !chosen.some((c) => c.id === w.id))
+      const rest = pool.filter((c) => !chosen.some((picked) => picked.id === c.id))
       chosen.push(...sample(rest, size - chosen.length))
     }
 
     daily.value = {
       date: today,
-      wordIds: chosen.map((w) => w.id),
-      completedWordIds: [],
+      cardIds: chosen.map((c) => c.id),
+      completedCardIds: [],
     }
     return daily.value
   }
 
-  function markDailyWordDone(wordId: string) {
+  function markDailyCardDone(cardId: string) {
     const session = daily.value
     if (!session || session.date !== todayKey()) return
-    if (!session.wordIds.includes(wordId)) return
-    if (session.completedWordIds.includes(wordId)) return
+    if (!session.cardIds.includes(cardId)) return
+    if (session.completedCardIds.includes(cardId)) return
 
-    session.completedWordIds.push(wordId)
-    if (session.completedWordIds.length === session.wordIds.length) {
+    session.completedCardIds.push(cardId)
+    if (session.completedCardIds.length === session.cardIds.length) {
       state.value.dailyCompletions += 1
     }
   }
@@ -291,13 +342,13 @@ export const useProgressStore = defineStore('progress', () => {
   const dailyComplete = computed(() => {
     const session = daily.value
     if (!session || session.date !== todayKey()) return false
-    return session.completedWordIds.length === session.wordIds.length
+    return session.completedCardIds.length === session.cardIds.length
   })
 
   // --- Reset --------------------------------------------------------------
 
-  function resetWord(wordId: string) {
-    delete state.value.words[wordId]
+  function resetCard(cardId: string) {
+    delete state.value.cards[cardId]
   }
 
   function resetAll() {
@@ -314,10 +365,10 @@ export const useProgressStore = defineStore('progress', () => {
     state,
     daily,
     pendingBadges,
-    wordProgress,
+    cardProgress,
     masteredIds,
     masteredCount,
-    missedWordIds,
+    missedCardIds,
     totalCorrect,
     totalAttempts,
     accuracy,
@@ -333,7 +384,7 @@ export const useProgressStore = defineStore('progress', () => {
     checkBadges,
     drainPendingBadges,
     ensureDailySession,
-    resetWord,
+    resetCard,
     resetAll,
   }
 })

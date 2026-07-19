@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useWordsStore } from '@/stores/words'
+import { useI18n } from 'vue-i18n'
+import { useCardsStore } from '@/stores/cards'
 import { sample, shuffle } from '@/lib/random'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
@@ -8,15 +9,17 @@ import { useSpeech } from '@/composables/useSpeech'
 import { useConfetti } from '@/composables/useConfetti'
 import AppButton from '@/components/AppButton.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
-import type { LevelId, SightWord } from '@/types'
+import LevelNotFound from '@/components/LevelNotFound.vue'
+import type { Card, LevelId } from '@/types'
 
 const props = defineProps<{ levelId: string }>()
 
-const library = useWordsStore()
+const library = useCardsStore()
 const progress = useProgressStore()
 const settings = useSettingsStore()
-const { speak, supported } = useSpeech()
+const { speak, currentLang, hasVoiceFor } = useSpeech()
 const { burst } = useConfetti()
+const { t } = useI18n()
 
 const QUESTION_COUNT = 10
 const CHOICES = 4
@@ -24,8 +27,8 @@ const CHOICES = 4
 const level = computed(() => library.getLevel(Number(props.levelId) as LevelId))
 
 interface Question {
-  answer: SightWord
-  choices: SightWord[]
+  answer: Card
+  choices: Card[]
 }
 
 const questions = ref<Question[]>([])
@@ -35,23 +38,59 @@ const correctCount = ref(0)
 const finished = ref(false)
 
 /**
- * Distractors come from the same level first — words of similar length and
+ * The quiz has three shapes, because a single one cannot serve all the content
+ * honestly:
+ *
+ *  - kanji  — show the character, pick its meaning. Kanji recognition is about
+ *             meaning, and a spoken prompt would test listening instead.
+ *  - word, with a voice — hear it, pick the written word. The word itself is
+ *             never shown, or the question answers itself.
+ *  - word, without a voice — show the sentence with the word blanked out. This
+ *             is the Filipino case on most desktops, and it tests the same
+ *             recognition without needing audio the device does not have.
+ */
+const isKanjiQuiz = computed(
+  () => library.getLevel(Number(props.levelId))?.cards[0]?.kind === 'kanji',
+)
+
+const canHear = computed(
+  () => settings.settings.speechEnabled && hasVoiceFor(currentLang.value),
+)
+
+const mode = computed<'meaning' | 'listen' | 'cloze'>(() => {
+  if (isKanjiQuiz.value) return 'meaning'
+  return canHear.value ? 'listen' : 'cloze'
+})
+
+/** The label shown on a choice button, which differs by question shape. */
+function choiceLabel(card: Card): string {
+  if (mode.value === 'meaning') {
+    return card.kind === 'kanji' ? card.meaning : card.text
+  }
+  return card.kind === 'kanji' ? card.char : card.text
+}
+
+/**
+ * Distractors come from the same level first — cards of similar length and
  * familiarity make a real discrimination test. Falling back to the full list
  * only matters for levels smaller than the choice count.
  */
 function buildQuestions(): Question[] {
-  const levelWords = level.value?.words ?? []
-  if (levelWords.length === 0) return []
+  const levelCards = level.value?.cards ?? []
+  if (levelCards.length === 0) return []
 
-  const asked = sample(levelWords, Math.min(QUESTION_COUNT, levelWords.length))
+  const asked = sample(levelCards, Math.min(QUESTION_COUNT, levelCards.length))
 
   return asked.map((answer) => {
-    const sameLevel = levelWords.filter((w) => w.id !== answer.id)
+    const sameLevel = levelCards.filter((c) => c.id !== answer.id)
     let distractors = sample(sameLevel, CHOICES - 1)
 
     if (distractors.length < CHOICES - 1) {
-      const elsewhere = library.allWords.filter(
-        (w) => w.id !== answer.id && !distractors.some((d) => d.id === w.id),
+      // Only ever from the same language — an English distractor in a Japanese
+      // quiz is not a wrong answer a child could plausibly consider, so it
+      // makes the question easier rather than harder.
+      const elsewhere = library.allCards.filter(
+        (c) => c.id !== answer.id && !distractors.some((d) => d.id === c.id),
       )
       distractors = [
         ...distractors,
@@ -69,8 +108,15 @@ const isRight = computed(
   () => answered.value && selectedId.value === current.value?.answer.id,
 )
 
+/** A kanji is spoken by a reading; the bare character has no single one. */
+function spokenText(card: Card): string {
+  if (card.kind !== 'kanji') return card.text
+  return card.kun[0] ?? card.on[0] ?? card.char
+}
+
 function askCurrent() {
-  if (current.value && settings.settings.speechEnabled) speak(current.value.answer.text)
+  if (mode.value !== 'listen' || !current.value) return
+  speak(spokenText(current.value.answer))
 }
 
 function start() {
@@ -85,11 +131,11 @@ function start() {
 onMounted(start)
 watch(index, askCurrent)
 
-function choose(word: SightWord) {
+function choose(card: Card) {
   if (answered.value || !current.value) return
 
-  selectedId.value = word.id
-  const correct = word.id === current.value.answer.id
+  selectedId.value = card.id
+  const correct = card.id === current.value.answer.id
   if (correct) correctCount.value++
   progress.recordAnswer(current.value.answer.id, correct, 'quiz')
 
@@ -108,18 +154,29 @@ function advance() {
   }
 }
 
-function choiceClass(word: SightWord) {
+function choiceClass(card: Card) {
   if (!answered.value) {
     return 'bg-white dark:bg-night-card shadow-[0_5px_0_0_rgba(30,42,71,0.15)] dark:shadow-[0_5px_0_0_rgba(0,0,0,0.5)] hover:-translate-y-1'
   }
-  if (word.id === current.value?.answer.id) {
+  if (card.id === current.value?.answer.id) {
     return 'bg-mint text-white shadow-[0_5px_0_0_var(--color-mint-deep)]'
   }
-  if (word.id === selectedId.value) {
+  if (card.id === selectedId.value) {
     return 'bg-coral text-white shadow-[0_5px_0_0_var(--color-coral-deep)]'
   }
   return 'bg-white dark:bg-night-card opacity-40'
 }
+
+/** The sentence with the answer blanked out, for the no-audio question shape. */
+const clozeSentence = computed(() => {
+  const answer = current.value?.answer
+  if (!answer || answer.kind !== 'word') return ''
+  const escaped = answer.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return answer.sentence.replace(
+    new RegExp(`(^|[^\\p{L}])${escaped}([^\\p{L}]|$)`, 'iu'),
+    '$1____$2',
+  )
+})
 
 const scorePercent = computed(() =>
   questions.value.length === 0
@@ -136,33 +193,43 @@ const scorePercent = computed(() =>
           :value="index + 1"
           :max="questions.length"
           :accent="level.accent"
-          :label="`Question ${index + 1} of ${questions.length}`"
+          :label="t('quiz.questionOf', { current: index + 1, total: questions.length })"
           :show-percent="false"
         />
       </div>
 
       <div class="deck-card mb-6 p-6 text-center sm:p-8">
         <p class="text-sm font-bold tracking-[0.2em] uppercase opacity-50">
-          Find this word
+          {{ mode === 'meaning' ? t('quiz.whatMeaning') : t('quiz.findWord') }}
         </p>
 
-        <!-- With speech available the word is spoken, not shown — otherwise the
-             question answers itself. Without speech we show the sentence with
-             the word blanked out, which tests the same recognition. -->
-        <template v-if="supported && settings.settings.speechEnabled">
-          <button
-            type="button"
-            class="chunky-btn mx-auto mt-4 flex items-center gap-3 bg-grape px-7 py-4 text-xl text-white shadow-[0_5px_0_0_var(--color-grape-deep)]"
-            @click="speak(current.answer.text)"
-          >
-            <span aria-hidden="true">🔊</span> Hear it again
-          </button>
-        </template>
-        <template v-else>
-          <p class="mt-4 font-[family-name:var(--font-word)] text-3xl leading-snug sm:text-4xl">
-            {{ current.answer.sentence.replace(new RegExp(`\\b${current.answer.text}\\b`, 'i'), '____') }}
-          </p>
-        </template>
+        <!-- Kanji: the character is the question. -->
+        <p
+          v-if="mode === 'meaning' && current.answer.kind === 'kanji'"
+          lang="ja"
+          class="mt-4 font-[family-name:var(--font-word)] text-[clamp(4rem,18vw,8rem)] leading-none font-bold"
+        >
+          {{ current.answer.char }}
+        </p>
+
+        <!-- Word with a voice: the word is spoken, never shown. -->
+        <button
+          v-else-if="mode === 'listen'"
+          type="button"
+          class="chunky-btn mx-auto mt-4 flex items-center gap-3 bg-grape px-7 py-4 text-xl text-white shadow-[0_5px_0_0_var(--color-grape-deep)]"
+          @click="speak(spokenText(current.answer))"
+        >
+          <span aria-hidden="true">🔊</span> {{ t('quiz.hearAgain') }}
+        </button>
+
+        <!-- Word without a voice: the sentence, with the word blanked out. -->
+        <p
+          v-else
+          :lang="current.answer.language"
+          class="mt-4 font-[family-name:var(--font-word)] text-3xl leading-snug sm:text-4xl"
+        >
+          {{ clozeSentence }}
+        </p>
       </div>
 
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -170,12 +237,20 @@ const scorePercent = computed(() =>
           v-for="choice in current.choices"
           :key="choice.id"
           type="button"
-          class="chunky-btn px-4 py-6 font-[family-name:var(--font-word)] text-3xl font-bold break-all sm:text-4xl"
-          :class="choiceClass(choice)"
+          class="chunky-btn px-4 py-6 font-[family-name:var(--font-word)] font-bold"
+          :class="[
+            choiceClass(choice),
+            // Meaning choices are English prose and need to wrap as words;
+            // word and character choices are single tokens set much larger.
+            mode === 'meaning'
+              ? 'text-xl sm:text-2xl'
+              : 'text-3xl break-all sm:text-4xl',
+          ]"
+          :lang="mode === 'meaning' ? 'en' : choice.language"
           :disabled="answered"
           @click="choose(choice)"
         >
-          {{ choice.text }}
+          {{ choiceLabel(choice) }}
         </button>
       </div>
 
@@ -185,7 +260,13 @@ const scorePercent = computed(() =>
         role="status"
         aria-live="polite"
       >
-        {{ isRight ? '⭐️ That’s right!' : `The word was “${current.answer.text}”` }}
+        <template v-if="isRight">{{ t('quiz.right') }}</template>
+        <template v-else-if="mode === 'meaning'">
+          {{ t('quiz.wasMeaning', { text: choiceLabel(current.answer) }) }}
+        </template>
+        <template v-else>
+          {{ t('quiz.wasWord', { text: choiceLabel(current.answer) }) }}
+        </template>
       </p>
     </template>
 
@@ -194,7 +275,7 @@ const scorePercent = computed(() =>
         {{ scorePercent === 100 ? '🎉' : scorePercent >= 70 ? '🌟' : '💪' }}
       </p>
       <p class="mt-3 text-sm font-bold tracking-[0.2em] uppercase opacity-50">
-        Quiz complete
+        {{ t('quiz.complete') }}
       </p>
       <p class="my-2 font-[family-name:var(--font-word)] text-6xl font-bold">
         {{ correctCount }} / {{ questions.length }}
@@ -202,23 +283,32 @@ const scorePercent = computed(() =>
       <p class="text-lg opacity-70">
         {{
           scorePercent === 100
-            ? 'A perfect score.'
+            ? t('quiz.summaryPerfect')
             : scorePercent >= 70
-              ? 'Nicely done.'
-              : 'Keep practising — these words are close.'
+              ? t('quiz.summaryStrong')
+              : t('quiz.summaryLow')
         }}
       </p>
 
       <div class="mx-auto mt-6 max-w-sm">
-        <ProgressBar :value="scorePercent" :accent="level.accent" :show-percent="false" />
+        <ProgressBar
+          :value="scorePercent"
+          :accent="level.accent"
+          :show-percent="false"
+        />
       </div>
 
       <div class="mt-8 flex flex-wrap justify-center gap-3">
-        <AppButton variant="ghost" @click="start">Play again</AppButton>
-        <AppButton variant="primary" :to="{ name: 'level', params: { levelId: level.id } }">
-          Back to level
+        <AppButton variant="ghost" @click="start">{{ t('quiz.again') }}</AppButton>
+        <AppButton
+          variant="primary"
+          :to="{ name: 'level', params: { levelId: level.id } }"
+        >
+          {{ t('quiz.backToLevel') }}
         </AppButton>
       </div>
     </div>
   </div>
+
+  <LevelNotFound v-else />
 </template>

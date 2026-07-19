@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import type { AccentName, PracticeMode, SightWord } from '@/types'
+import { useI18n } from 'vue-i18n'
+import type { AccentName, Card, PracticeMode } from '@/types'
+import { detailKind, detailLabelKeys, spokenDetail } from '@/lib/cards'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { useSpeech } from '@/composables/useSpeech'
@@ -19,38 +21,75 @@ import ProgressBar from '@/components/ProgressBar.vue'
  */
 const props = withDefaults(
   defineProps<{
-    words: SightWord[]
+    cards: Card[]
     mode: PracticeMode
     accent?: AccentName
     title: string
-    /** Shown on the results screen once every word has been marked. */
+    /** Shown on the results screen once every card has been marked. */
     finishLabel?: string
   }>(),
-  { accent: 'mint', finishLabel: 'Done' },
+  { accent: 'mint' },
 )
 
 const emit = defineEmits<{ finished: [correct: number, total: number] }>()
 
 const progress = useProgressStore()
 const settings = useSettingsStore()
-const { speak } = useSpeech()
+const { speak, currentLang, hasVoiceFor } = useSpeech()
 const { burst } = useConfetti()
 const focus = useFullscreen()
+const { t } = useI18n()
+
+/**
+ * What gets spoken for a card. A kanji is read by one of its readings rather
+ * than by the character itself — a synthesiser handed a bare kanji picks a
+ * reading arbitrarily, and often the wrong one for the level being taught.
+ * Kun'yomi comes first: it is the reading a first-grader meets in isolation.
+ */
+function spokenText(card: Card): string {
+  if (card.kind !== 'kanji') return card.text
+  return card.kun[0] ?? card.on[0] ?? card.char
+}
 
 function speakCurrent() {
-  if (current.value) speak(current.value.text)
+  if (current.value) speak(spokenText(current.value))
+}
+
+/** Reads whatever the reveal holds that works as one utterance. */
+function speakSentence() {
+  const text = current.value ? spokenDetail(current.value) : null
+  if (text) speak(text)
 }
 
 const index = ref(0)
 const correctCount = ref(0)
-const missedWords = ref<SightWord[]>([])
-const showSentence = ref(false)
+const missedCards = ref<Card[]>([])
+const showDetail = ref(false)
 const finished = ref(false)
-/** Brief visual acknowledgement of the last mark, cleared on the next word. */
+/** Brief visual acknowledgement of the last mark, cleared on the next card. */
 const lastMark = ref<'correct' | 'retry' | null>(null)
 
-const current = computed<SightWord | undefined>(() => props.words[index.value])
-const total = computed(() => props.words.length)
+const current = computed<Card | undefined>(() => props.cards[index.value])
+const total = computed(() => props.cards.length)
+
+/** Whether this device can read the language in play aloud at all. */
+const canHear = computed(
+  () => settings.settings.speechEnabled && hasVoiceFor(currentLang.value),
+)
+
+/** Kanji cards reveal readings and a meaning; word cards reveal a sentence. */
+/**
+ * One button reveals three different things — a sentence, a kana's example
+ * word, or a kanji's readings — so its label is derived from the card rather
+ * than assumed. See `detailKind`.
+ */
+const detailLabel = computed(() => {
+  const card = current.value
+  const kind = card ? detailKind(card) : null
+  if (!kind) return t('session.showSentence')
+  const keys = detailLabelKeys(kind)
+  return showDetail.value ? t(keys.hide) : t(keys.show)
+})
 
 /**
  * Speaks the word only when the parent has opted into automatic audio. Off by
@@ -59,22 +98,22 @@ const total = computed(() => props.words.length)
  */
 function maybeSpeak() {
   if (!settings.settings.autoSpeak) return
-  if (current.value && settings.settings.speechEnabled) speak(current.value.text)
+  if (current.value && settings.settings.speechEnabled) speakCurrent()
 }
 
 onMounted(maybeSpeak)
 watch(index, () => {
-  showSentence.value = false
+  showDetail.value = false
   maybeSpeak()
 })
 
 function mark(correct: boolean) {
-  const word = current.value
-  if (!word || finished.value) return
+  const card = current.value
+  if (!card || finished.value) return
 
-  progress.recordAnswer(word.id, correct, props.mode)
+  progress.recordAnswer(card.id, correct, props.mode)
   if (correct) correctCount.value++
-  else missedWords.value.push(word)
+  else missedCards.value.push(card)
 
   lastMark.value = correct ? 'correct' : 'retry'
   setTimeout(() => (lastMark.value = null), 450)
@@ -94,9 +133,9 @@ function mark(correct: boolean) {
 function restart() {
   index.value = 0
   correctCount.value = 0
-  missedWords.value = []
+  missedCards.value = []
   finished.value = false
-  showSentence.value = false
+  showDetail.value = false
   maybeSpeak()
 }
 
@@ -105,10 +144,10 @@ const scorePercent = computed(() =>
 )
 
 const summary = computed(() => {
-  if (scorePercent.value === 100) return 'Every word, first try.'
-  if (scorePercent.value >= 70) return 'Strong reading today.'
-  if (scorePercent.value >= 40) return 'Good effort — a few to practise again.'
-  return 'These words need more practice. Try them again tomorrow.'
+  if (scorePercent.value === 100) return t('session.summaryPerfect')
+  if (scorePercent.value >= 70) return t('session.summaryStrong')
+  if (scorePercent.value >= 40) return t('session.summaryFair')
+  return t('session.summaryLow')
 })
 </script>
 
@@ -120,7 +159,7 @@ const summary = computed(() => {
           :value="index + 1"
           :max="total"
           :accent="accent"
-          :label="`${title} · word ${index + 1} of ${total}`"
+          :label="t('session.cardOf', { title, current: index + 1, total })"
           :show-percent="false"
         />
       </div>
@@ -134,10 +173,9 @@ const summary = computed(() => {
       >
         <div :key="current.id" class="relative">
           <WordCard
-            :word="current.text"
-            :sentence="current.sentence"
+            :card="current"
             :accent="accent"
-            :show-sentence="showSentence"
+            :show-detail="showDetail"
             :stack-depth="Math.min(2, total - index - 1)"
           />
           <!-- The mark flash sits over the card so the adult's tap gets a
@@ -160,13 +198,13 @@ const summary = computed(() => {
       </Transition>
 
       <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-        <SpeakButton :text="current.text" />
+        <SpeakButton :text="spokenText(current)" />
         <button
           type="button"
           class="chunky-btn bg-white px-5 py-2.5 text-ink shadow-[0_4px_0_0_rgba(30,42,71,0.15)] dark:bg-night-card dark:text-paper dark:shadow-[0_4px_0_0_rgba(0,0,0,0.5)]"
-          @click="showSentence = !showSentence"
+          @click="showDetail = !showDetail"
         >
-          {{ showSentence ? 'Hide sentence' : 'Show sentence' }}
+          {{ detailLabel }}
         </button>
         <button
           type="button"
@@ -176,19 +214,19 @@ const summary = computed(() => {
           <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
           </svg>
-          Big word mode
+          {{ t('session.focusMode') }}
         </button>
       </div>
 
       <p class="mt-8 mb-3 text-center text-sm font-bold tracking-[0.18em] uppercase opacity-45">
-        Grown-up: did they read it?
+        {{ t('session.grownUp') }}
       </p>
       <div class="grid gap-3 sm:grid-cols-2">
         <AppButton variant="success" size="lg" block @click="mark(true)">
-          ✓ Correct
+          {{ t('session.correct') }}
         </AppButton>
         <AppButton variant="danger" size="lg" block @click="mark(false)">
-          ↻ Try again
+          {{ t('session.retry') }}
         </AppButton>
       </div>
 
@@ -196,20 +234,24 @@ const summary = computed(() => {
            buttons rather than offering a swipe that would skip the score. -->
       <FocusCard
         v-if="focus.active.value"
-        :word="current.text"
+        :card="current"
         :accent="accent"
+        :show-detail="showDetail"
+        :can-speak="canHear"
         :position="index + 1"
         :total="total"
         @close="focus.exit()"
         @speak="speakCurrent"
+        @speak-detail="speakSentence"
+        @toggle-detail="showDetail = !showDetail"
       >
         <template #actions>
           <div class="grid gap-3 sm:grid-cols-2">
             <AppButton variant="success" size="lg" block @click="mark(true)">
-              ✓ Correct
+              {{ t('session.correct') }}
             </AppButton>
             <AppButton variant="danger" size="lg" block @click="mark(false)">
-              ↻ Try again
+              {{ t('session.retry') }}
             </AppButton>
           </div>
         </template>
@@ -223,7 +265,7 @@ const summary = computed(() => {
           {{ scorePercent === 100 ? '🎉' : scorePercent >= 70 ? '🌟' : '💪' }}
         </p>
         <p class="mt-3 text-sm font-bold tracking-[0.2em] uppercase opacity-50">
-          {{ title }} complete
+          {{ t('session.complete', { title }) }}
         </p>
         <p class="my-2 font-[family-name:var(--font-word)] text-6xl font-bold">
           {{ correctCount }} / {{ total }}
@@ -234,26 +276,29 @@ const summary = computed(() => {
           <ProgressBar :value="scorePercent" :accent="accent" :show-percent="false" />
         </div>
 
-        <div v-if="missedWords.length" class="mt-8 text-left">
+        <div v-if="missedCards.length" class="mt-8 text-left">
           <p class="mb-2 text-sm font-bold tracking-wider uppercase opacity-50">
-            Practise these again
+            {{ t('session.practiseAgain') }}
           </p>
           <ul class="flex flex-wrap gap-2">
             <li
-              v-for="word in missedWords"
-              :key="word.id"
+              v-for="card in missedCards"
+              :key="card.id"
               class="rounded-2xl bg-coral/20 px-4 py-2 font-[family-name:var(--font-word)] text-xl font-bold"
+              :lang="card.language"
             >
-              {{ word.text }}
+              {{ card.kind === 'kanji' ? card.char : card.text }}
             </li>
           </ul>
         </div>
 
         <div class="mt-8 flex flex-wrap justify-center gap-3">
-          <AppButton variant="ghost" @click="restart">Go again</AppButton>
+          <AppButton variant="ghost" @click="restart">
+            {{ t('session.goAgain') }}
+          </AppButton>
           <slot name="finish-action">
             <AppButton variant="primary" :to="{ name: 'home' }">
-              {{ finishLabel }}
+              {{ finishLabel ?? t('session.finish') }}
             </AppButton>
           </slot>
         </div>

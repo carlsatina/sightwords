@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { MASTERY_STREAK, useProgressStore } from './progress'
-import { getLevel } from '@/data/words'
+import { useCardsStore } from '@/stores/cards'
 import { todayKey } from '@/lib/dates'
+
+/**
+ * Card ids are namespaced by language, so every id here carries its `en:`
+ * prefix — a bare "the" is a v1 id and no longer resolves to a live card.
+ */
 
 function dateKeyOffsetBy(days: number): string {
   const d = new Date()
@@ -29,39 +34,39 @@ describe('mastery', () => {
   it(`masters a word after ${MASTERY_STREAK} correct answers in a row`, () => {
     const p = store()
     for (let i = 0; i < MASTERY_STREAK - 1; i++) {
-      p.recordAnswer('the', true, 'practice')
-      expect(p.masteredIds.has('the')).toBe(false)
+      p.recordAnswer('en:the', true, 'practice')
+      expect(p.masteredIds.has('en:the')).toBe(false)
     }
-    p.recordAnswer('the', true, 'practice')
-    expect(p.masteredIds.has('the')).toBe(true)
+    p.recordAnswer('en:the', true, 'practice')
+    expect(p.masteredIds.has('en:the')).toBe(true)
   })
 
   it('revokes mastery on a miss and queues the word for review', () => {
     const p = store()
-    for (let i = 0; i < MASTERY_STREAK; i++) p.recordAnswer('the', true, 'practice')
+    for (let i = 0; i < MASTERY_STREAK; i++) p.recordAnswer('en:the', true, 'practice')
 
-    p.recordAnswer('the', false, 'practice')
+    p.recordAnswer('en:the', false, 'practice')
 
-    expect(p.masteredIds.has('the')).toBe(false)
-    expect(p.missedWordIds).toContain('the')
+    expect(p.masteredIds.has('en:the')).toBe(false)
+    expect(p.missedCardIds).toContain('en:the')
     // The historical tally survives — only the streak resets.
-    expect(p.wordProgress['the'].correct).toBe(MASTERY_STREAK)
-    expect(p.wordProgress['the'].incorrect).toBe(1)
+    expect(p.cardProgress['en:the'].correct).toBe(MASTERY_STREAK)
+    expect(p.cardProgress['en:the'].incorrect).toBe(1)
   })
 
   it('clears a word from review once it is mastered again', () => {
     const p = store()
-    p.recordAnswer('the', false, 'practice')
-    expect(p.missedWordIds).toContain('the')
+    p.recordAnswer('en:the', false, 'practice')
+    expect(p.missedCardIds).toContain('en:the')
 
-    for (let i = 0; i < MASTERY_STREAK; i++) p.recordAnswer('the', true, 'practice')
-    expect(p.missedWordIds).not.toContain('the')
+    for (let i = 0; i < MASTERY_STREAK; i++) p.recordAnswer('en:the', true, 'practice')
+    expect(p.missedCardIds).not.toContain('en:the')
   })
 
   it('reports accuracy across every attempt', () => {
     const p = store()
-    p.recordAnswer('a', true, 'quiz')
-    p.recordAnswer('a', false, 'quiz')
+    p.recordAnswer('en:a', true, 'quiz')
+    p.recordAnswer('en:a', false, 'quiz')
     expect(p.totalAttempts).toBe(2)
     expect(p.accuracy).toBe(50)
   })
@@ -70,11 +75,11 @@ describe('mastery', () => {
 describe('streaks', () => {
   it('starts at one and does not grow twice in a day', () => {
     const p = store()
-    p.recordAnswer('a', true, 'practice')
+    p.recordAnswer('en:a', true, 'practice')
     expect(p.state.currentStreak).toBe(1)
     expect(p.state.lastPracticeDate).toBe(todayKey())
 
-    p.recordAnswer('and', true, 'practice')
+    p.recordAnswer('en:and', true, 'practice')
     expect(p.state.currentStreak).toBe(1)
   })
 
@@ -84,7 +89,7 @@ describe('streaks', () => {
     p.state.longestStreak = 4
     p.state.lastPracticeDate = dateKeyOffsetBy(-1)
 
-    p.recordAnswer('big', true, 'practice')
+    p.recordAnswer('en:big', true, 'practice')
 
     expect(p.state.currentStreak).toBe(5)
     expect(p.state.longestStreak).toBe(5)
@@ -96,7 +101,7 @@ describe('streaks', () => {
     p.state.longestStreak = 5
     p.state.lastPracticeDate = dateKeyOffsetBy(-3)
 
-    p.recordAnswer('blue', true, 'practice')
+    p.recordAnswer('en:blue', true, 'practice')
 
     expect(p.state.currentStreak).toBe(1)
     expect(p.state.longestStreak).toBe(5)
@@ -106,7 +111,7 @@ describe('streaks', () => {
 describe('badges', () => {
   it('queues a newly earned badge exactly once', () => {
     const p = store()
-    p.recordAnswer('a', true, 'practice')
+    p.recordAnswer('en:a', true, 'practice')
 
     expect(p.badges.find((b) => b.id === 'first-word')?.earned).toBe(true)
     expect(p.pendingBadges.some((b) => b.id === 'first-word')).toBe(true)
@@ -114,7 +119,7 @@ describe('badges', () => {
     expect(p.drainPendingBadges().length).toBeGreaterThan(0)
     expect(p.pendingBadges).toHaveLength(0)
 
-    p.recordAnswer('and', true, 'practice')
+    p.recordAnswer('en:and', true, 'practice')
     expect(p.pendingBadges.some((b) => b.id === 'first-word')).toBe(false)
   })
 
@@ -129,9 +134,9 @@ describe('badges', () => {
 
 describe('daily practice', () => {
   it('builds a set of the requested size with no repeats', () => {
-    const session = store().ensureDailySession(10, [1, 2, 3, 4, 5])
-    expect(session.wordIds).toHaveLength(10)
-    expect(new Set(session.wordIds).size).toBe(10)
+    const session = store().ensureDailySession(10, [1, 2, 3, 4, 5, 6])
+    expect(session.cardIds).toHaveLength(10)
+    expect(new Set(session.cardIds).size).toBe(10)
   })
 
   it('returns the same set for the rest of the day', () => {
@@ -139,24 +144,25 @@ describe('daily practice', () => {
     const p = store()
     const first = p.ensureDailySession(10, [1, 2, 3, 4, 5])
     const second = p.ensureDailySession(10, [1, 2, 3, 4, 5])
-    expect(second.wordIds).toEqual(first.wordIds)
+    expect(second.cardIds).toEqual(first.cardIds)
+    expect(first.cardIds.length).toBeGreaterThan(0)
   })
 
   it('draws only from levels the parent left unlocked', () => {
     const session = store().ensureDailySession(10, [1])
-    const levelOne = new Set(getLevel(1)!.words.map((w) => w.id))
-    expect(session.wordIds.every((id) => levelOne.has(id))).toBe(true)
+    const levelOne = new Set(useCardsStore().getLevel(1)!.cards.map((c) => c.id))
+    expect(session.cardIds.every((id) => levelOne.has(id))).toBe(true)
   })
 
   it('marks the day complete once, however many extra answers arrive', () => {
     const p = store()
     const session = p.ensureDailySession(5, [1, 2, 3, 4, 5])
-    for (const id of session.wordIds) p.recordAnswer(id, true, 'daily')
+    for (const id of session.cardIds) p.recordAnswer(id, true, 'daily')
 
     expect(p.dailyComplete).toBe(true)
     expect(p.state.dailyCompletions).toBe(1)
 
-    p.recordAnswer(session.wordIds[0], true, 'daily')
+    p.recordAnswer(session.cardIds[0], true, 'daily')
     expect(p.state.dailyCompletions).toBe(1)
   })
 })
@@ -164,7 +170,7 @@ describe('daily practice', () => {
 describe('reset', () => {
   it('clears every trace of progress', () => {
     const p = store()
-    for (let i = 0; i < MASTERY_STREAK; i++) p.recordAnswer('the', true, 'practice')
+    for (let i = 0; i < MASTERY_STREAK; i++) p.recordAnswer('en:the', true, 'practice')
     p.ensureDailySession(5, [1])
 
     p.resetAll()
@@ -181,7 +187,7 @@ describe('reset', () => {
     // every reset — inherited the previous child's progress.
     const first = useProgressStore()
     for (let i = 0; i < MASTERY_STREAK; i++) {
-      first.recordAnswer('the', true, 'practice')
+      first.recordAnswer('en:the', true, 'practice')
     }
     expect(first.masteredCount).toBe(1)
 

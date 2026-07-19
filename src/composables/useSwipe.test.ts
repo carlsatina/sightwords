@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSwipe } from './useSwipe'
 
 /**
@@ -34,6 +34,15 @@ function gesture(
   listeners.touchend(touchEvent([to], [to]))
 
   return { ...handlers, dragX }
+}
+
+/** One quick still touch, at the current fake clock time. */
+function tap(listeners: ReturnType<typeof useSwipe>['listeners']) {
+  const at = Date.now()
+  const point = { x: 200, y: 300 }
+  listeners.touchstart(touchEvent([point]))
+  vi.setSystemTime(at + 60)
+  listeners.touchend(touchEvent([point], [point]))
 }
 
 describe('tap detection', () => {
@@ -127,5 +136,106 @@ describe('drag tracking', () => {
     listeners.touchmove(touchEvent([{ x: 240, y: 300 }]))
     listeners.touchcancel()
     expect(dragX.value).toBe(0)
+  })
+})
+
+describe('taps on controls', () => {
+  it('leaves a tap that started on a button to the button', () => {
+    // Touch events bubble to the surface before any click fires, so
+    // `@click.stop` on the control cannot prevent this — tapping "Show the
+    // sentence" would otherwise also speak the word.
+    const onTap = vi.fn()
+    const { listeners } = useSwipe({ onTap })
+
+    const button = document.createElement('button')
+    const event = {
+      touches: [{ clientX: 200, clientY: 300 }],
+      changedTouches: [{ clientX: 200, clientY: 300 }],
+      target: button,
+    } as unknown as TouchEvent
+
+    listeners.touchstart(event)
+    listeners.touchend(event)
+
+    expect(onTap).not.toHaveBeenCalled()
+  })
+
+  it('still handles a tap on the bare surface', () => {
+    const onTap = vi.fn()
+    const { listeners } = useSwipe({ onTap })
+
+    const surface = document.createElement('div')
+    const event = {
+      touches: [{ clientX: 200, clientY: 300 }],
+      changedTouches: [{ clientX: 200, clientY: 300 }],
+      target: surface,
+    } as unknown as TouchEvent
+
+    listeners.touchstart(event)
+    listeners.touchend(event)
+
+    expect(onTap).toHaveBeenCalledOnce()
+  })
+})
+
+describe('double tap', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('toggles on the second tap instead of repeating the first action', () => {
+    // The first tap still speaks immediately — delaying it to disambiguate
+    // would make every single tap feel broken — so a double tap reads as
+    // "speak, then reveal", never "speak twice".
+    const taps: string[] = []
+    const { listeners } = useSwipe({
+      onTap: () => taps.push('tap'),
+      onDoubleTap: () => taps.push('double'),
+    })
+
+    tap(listeners)
+    tap(listeners)
+
+    expect(taps).toEqual(['tap', 'double'])
+  })
+
+  it('treats slow repeat taps as two separate taps', () => {
+    const taps: string[] = []
+    const { listeners } = useSwipe({
+      onTap: () => taps.push('tap'),
+      onDoubleTap: () => taps.push('double'),
+    })
+
+    tap(listeners)
+    vi.setSystemTime(Date.now() + 800)
+    tap(listeners)
+
+    expect(taps).toEqual(['tap', 'tap'])
+  })
+
+  it('starts a fresh pair after a double tap, not a running toggle', () => {
+    const taps: string[] = []
+    const { listeners } = useSwipe({
+      onTap: () => taps.push('tap'),
+      onDoubleTap: () => taps.push('double'),
+    })
+
+    tap(listeners)
+    tap(listeners)
+    tap(listeners)
+
+    expect(taps).toEqual(['tap', 'double', 'tap'])
+  })
+
+  it('falls back to plain taps when no double-tap handler is given', () => {
+    const taps: string[] = []
+    const { listeners } = useSwipe({ onTap: () => taps.push('tap') })
+
+    tap(listeners)
+    tap(listeners)
+
+    expect(taps).toEqual(['tap', 'tap'])
   })
 })

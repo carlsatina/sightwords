@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Badge } from '@/types'
 import { useProgressStore } from '@/stores/progress'
 import { useConfetti } from '@/composables/useConfetti'
@@ -10,6 +11,7 @@ import { useConfetti } from '@/composables/useConfetti'
  */
 const progress = useProgressStore()
 const { burst } = useConfetti()
+const { t } = useI18n()
 
 const current = ref<Badge | null>(null)
 const queue = ref<Badge[]>([])
@@ -63,10 +65,14 @@ onUnmounted(() => clearTimeout(timer))
         <span class="text-5xl leading-none" aria-hidden="true">{{ current.emoji }}</span>
         <span class="min-w-0">
           <span class="block text-xs font-bold tracking-[0.18em] text-marigold-deep uppercase">
-            Badge earned
+            {{ t('badgeToast.earned') }}
           </span>
-          <span class="block truncate text-xl font-extrabold">{{ current.name }}</span>
-          <span class="block truncate text-sm opacity-70">{{ current.description }}</span>
+          <span class="block truncate text-xl font-extrabold">
+            {{ t(`badges.${current.id}.name`) }}
+          </span>
+          <span class="block truncate text-sm opacity-70">
+            {{ t(`badges.${current.id}.description`) }}
+          </span>
         </span>
       </button>
     </div>

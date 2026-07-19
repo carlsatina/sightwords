@@ -1,11 +1,17 @@
 <script setup lang="ts">
+import { watch } from 'vue'
 import AppHeader from '@/components/AppHeader.vue'
 import BadgeToast from '@/components/BadgeToast.vue'
 import { useSettingsStore } from '@/stores/settings'
+import { setLocale } from '@/i18n'
 
 // Instantiated here so the theme class lands on <html> before the first paint
 // of any route.
-useSettingsStore()
+const settings = useSettingsStore()
+
+// The saved UI locale is the authority; vue-i18n is created with the default
+// before the store has loaded, so it is synced here and kept in step after.
+watch(() => settings.settings.uiLocale, setLocale, { immediate: true })
 </script>
 
 <template>
@@ -13,7 +19,7 @@ useSettingsStore()
     href="#main"
     class="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-[200] focus:rounded-xl focus:bg-grape focus:px-4 focus:py-2 focus:font-bold focus:text-white"
   >
-    Skip to content
+    {{ $t('app.skip') }}
   </a>
 
   <AppHeader />

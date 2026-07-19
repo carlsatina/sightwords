@@ -3,11 +3,13 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { useProgressStore } from '@/stores/progress'
+import { useI18n } from 'vue-i18n'
 
 const route = useRoute()
 const router = useRouter()
 const settings = useSettingsStore()
 const progress = useProgressStore()
+const { t } = useI18n()
 
 const isHome = computed(() => route.name === 'home')
 const streak = computed(() => progress.state.currentStreak)
@@ -26,7 +28,7 @@ function goBack() {
         v-if="!isHome"
         type="button"
         class="chunky-btn flex h-11 w-11 items-center justify-center bg-white text-ink shadow-[0_3px_0_0_rgba(30,42,71,0.15)] dark:bg-night-card dark:text-paper dark:shadow-[0_3px_0_0_rgba(0,0,0,0.5)]"
-        aria-label="Go back"
+        :aria-label="t('header.goBack')"
         @click="goBack"
       >
         <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -48,24 +50,24 @@ function goBack() {
           height="40"
           class="h-10 w-10 shrink-0"
         />
-        <span class="truncate">Sight Words</span>
+        <span class="truncate">{{ t('app.name') }}</span>
       </RouterLink>
 
       <div class="ml-auto flex items-center gap-2">
         <span
           v-if="streak > 0"
           class="flex items-center gap-1 rounded-full bg-marigold/20 px-3 py-1.5 text-sm font-bold text-marigold-deep dark:text-marigold"
-          :title="`${streak} day practice streak`"
+          :title="t('header.streakTitle', { count: streak })"
         >
           <span aria-hidden="true">🔥</span>
           <span class="tabular-nums">{{ streak }}</span>
-          <span class="sr-only">day practice streak</span>
+          <span class="sr-only">{{ t('header.streakLabel') }}</span>
         </span>
 
         <button
           type="button"
           class="chunky-btn flex h-11 w-11 items-center justify-center bg-white text-ink shadow-[0_3px_0_0_rgba(30,42,71,0.15)] dark:bg-night-card dark:text-paper dark:shadow-[0_3px_0_0_rgba(0,0,0,0.5)]"
-          :aria-label="settings.isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+          :aria-label="settings.isDark ? t('header.toLight') : t('header.toDark')"
           @click="settings.toggleDarkMode()"
         >
           <svg v-if="settings.isDark" viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
@@ -80,7 +82,7 @@ function goBack() {
         <RouterLink
           :to="{ name: 'parent' }"
           class="chunky-btn flex h-11 w-11 items-center justify-center bg-white text-ink shadow-[0_3px_0_0_rgba(30,42,71,0.15)] dark:bg-night-card dark:text-paper dark:shadow-[0_3px_0_0_rgba(0,0,0,0.5)]"
-          aria-label="Parent settings"
+          :aria-label="t('header.parentSettings')"
         >
           <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3" />

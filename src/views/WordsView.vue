@@ -1,25 +1,59 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useWordsStore } from '@/stores/words'
+import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useCardsStore } from '@/stores/cards'
 import { useProgressStore } from '@/stores/progress'
 import AppButton from '@/components/AppButton.vue'
-import type { LevelId } from '@/types'
+import type { Card, CardDraft, LevelId } from '@/types'
 
-const library = useWordsStore()
+const library = useCardsStore()
 const progress = useProgressStore()
+const { t } = useI18n()
 
-const activeLevelId = ref<LevelId>(1)
+/** Edits apply to the language currently being practised. */
+const language = computed(() => library.language)
+
+const activeLevelId = ref<LevelId>(library.levels[0]?.id ?? 1)
 const activeLevel = computed(() => library.getLevel(activeLevelId.value))
 
-/** Word id currently open for editing, or 'new' for the add form. */
+// Switching language changes the whole level set, so an id from the old
+// language would leave this page pointing at a level that no longer exists.
+watch(
+  () => language.value.code,
+  () => {
+    activeLevelId.value = library.levels[0]?.id ?? 1
+    cancelEdit()
+  },
+)
+
+/** Card id currently open for editing, or 'new' for the add form. */
 const editing = ref<string | null>(null)
-const draft = ref({ text: '', sentence: '' })
+const draft = ref<CardDraft>({ kind: 'word', text: '', sentence: '' })
 const formError = ref('')
 
 const importError = ref('')
 const notice = ref('')
 const confirmingReset = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+
+/**
+ * Which kind of card this level holds. A level is homogeneous in the shipped
+ * data, and mixing a sight word into a kanji level would give the quiz two
+ * incompatible question shapes in one round.
+ */
+const levelKind = computed<'word' | 'kanji'>(
+  () => activeLevel.value?.cards[0]?.kind ?? 'word',
+)
+
+/** Readings are edited as space-separated text; stored as arrays. */
+const onText = ref('')
+const kunText = ref('')
+
+function blankDraft(): CardDraft {
+  return levelKind.value === 'kanji'
+    ? { kind: 'kanji', char: '', on: [], kun: [], meaning: '' }
+    : { kind: 'word', text: '', sentence: '', meaning: '', sentenceMeaning: '' }
+}
 
 function flash(message: string) {
   notice.value = message
@@ -28,14 +62,36 @@ function flash(message: string) {
 
 function startAdd() {
   editing.value = 'new'
-  draft.value = { text: '', sentence: '' }
+  draft.value = blankDraft()
+  onText.value = ''
+  kunText.value = ''
   formError.value = ''
 }
 
-function startEdit(wordId: string, text: string, sentence: string) {
-  editing.value = wordId
-  draft.value = { text, sentence }
+function startEdit(card: Card) {
+  editing.value = card.id
   formError.value = ''
+
+  if (card.kind === 'kanji') {
+    draft.value = {
+      kind: 'kanji',
+      char: card.char,
+      on: [...card.on],
+      kun: [...card.kun],
+      meaning: card.meaning,
+      ...(card.example ? { example: card.example } : {}),
+    }
+    onText.value = card.on.join(' ')
+    kunText.value = card.kun.join(' ')
+  } else {
+    draft.value = {
+      kind: 'word',
+      text: card.text,
+      sentence: card.sentence,
+      ...(card.meaning ? { meaning: card.meaning } : {}),
+      ...(card.sentenceMeaning ? { sentenceMeaning: card.sentenceMeaning } : {}),
+    }
+  }
 }
 
 function cancelEdit() {
@@ -43,30 +99,61 @@ function cancelEdit() {
   formError.value = ''
 }
 
+/** Splits on any run of whitespace and drops empties, so trailing spaces are fine. */
+function parseReadings(value: string): string[] {
+  return value.split(/\s+/).filter(Boolean)
+}
+
 function submit() {
+  const payload: CardDraft =
+    draft.value.kind === 'kanji'
+      ? {
+          ...draft.value,
+          on: parseReadings(onText.value),
+          kun: parseReadings(kunText.value),
+        }
+      : draft.value
+
   const problem =
     editing.value === 'new'
-      ? library.addWord(activeLevelId.value, draft.value)
-      : library.updateWord(activeLevelId.value, editing.value!, draft.value)
+      ? library.addCard(language.value.code, activeLevelId.value, payload)
+      : library.updateCard(
+          language.value.code,
+          activeLevelId.value,
+          editing.value!,
+          payload,
+        )
 
   if (problem) {
     formError.value = problem
     return
   }
-  flash(editing.value === 'new' ? 'Word added.' : 'Word updated.')
+  flash(editing.value === 'new' ? t('words.added') : t('words.updated'))
   editing.value = null
 }
 
-function remove(wordId: string, text: string) {
-  const problem = library.deleteWord(activeLevelId.value, wordId)
+function remove(card: Card) {
+  const problem = library.deleteCard(language.value.code, activeLevelId.value, card.id)
   if (problem) {
     formError.value = problem
     return
   }
-  // Drop the score too, so a re-added word starts clean rather than inheriting
+  // Drop the score too, so a re-added card starts clean rather than inheriting
   // the old one's mastery.
-  progress.resetWord(wordId)
-  flash(`Removed “${text}”.`)
+  progress.resetCard(card.id)
+  flash(t('words.removed', { text: cardFace(card) }))
+}
+
+function cardFace(card: Card): string {
+  return card.kind === 'kanji' ? card.char : card.text
+}
+
+function cardDetail(card: Card): string {
+  if (card.kind !== 'kanji') {
+    return card.meaning ? `${card.sentence} — ${card.meaning}` : card.sentence
+  }
+  const readings = [...card.on, ...card.kun].join('・')
+  return readings ? `${readings} — ${card.meaning}` : card.meaning
 }
 
 // --- Import / export ------------------------------------------------------
@@ -79,7 +166,7 @@ function exportFile() {
   link.download = 'sight-words.json'
   link.click()
   URL.revokeObjectURL(url)
-  flash('Word list downloaded.')
+  flash(t('words.exported'))
 }
 
 async function onFileChosen(event: Event) {
@@ -90,10 +177,10 @@ async function onFileChosen(event: Event) {
   importError.value = ''
   try {
     library.importJson(await file.text())
-    flash('Word list imported.')
+    flash(t('words.imported'))
   } catch (error) {
     importError.value =
-      error instanceof Error ? error.message : 'That file could not be read.'
+      error instanceof Error ? error.message : t('words.importFailed')
   } finally {
     // Clear the input so choosing the same file again still fires a change.
     input.value = ''
@@ -104,16 +191,26 @@ function confirmReset() {
   library.resetToBuiltIn()
   confirmingReset.value = false
   editing.value = null
-  flash('Restored the built-in word list.')
+  flash(t('words.restored'))
 }
 </script>
 
 <template>
   <div class="pt-6">
-    <h1 class="text-4xl font-extrabold">Manage words</h1>
-    <p class="mt-1 opacity-60">
-      Add your child's own words, or change the ones that come with the app.
-      Everything is saved on this device.
+    <h1 class="text-4xl font-extrabold">{{ t('words.title') }}</h1>
+    <p class="mt-1 opacity-60">{{ t('words.blurb') }}</p>
+    <p class="mt-1 text-sm font-semibold opacity-60">
+      {{ t('words.editingLanguage', { language: language.name }) }}
+    </p>
+
+    <!-- The Filipino list is the one piece of shipped content with no
+         authoritative source behind it, so the page says so where a parent is
+         already looking at the words. -->
+    <p
+      v-if="language.code === 'fil'"
+      class="mt-4 rounded-2xl border-l-8 border-marigold bg-marigold/15 px-4 py-3 text-sm font-semibold"
+    >
+      {{ t('words.filipinoNotice') }}
     </p>
 
     <p
@@ -138,17 +235,23 @@ function confirmReset() {
             : 'bg-white dark:bg-night-card shadow-[0_4px_0_0_rgba(30,42,71,0.15)] dark:shadow-[0_4px_0_0_rgba(0,0,0,0.5)]'
         "
         :aria-pressed="level.id === activeLevelId"
-        @click="activeLevelId = level.id; cancelEdit()"
+        :lang="language.code"
+        @click="
+          activeLevelId = level.id;
+          cancelEdit()
+        "
       >
         {{ level.name }}
-        <span class="ml-1 opacity-60">{{ level.words.length }}</span>
+        <span class="ml-1 opacity-60">{{ level.cards.length }}</span>
       </button>
     </div>
 
-    <!-- Word list -->
+    <!-- Card list -->
     <section v-if="activeLevel" class="deck-card mt-5 p-5">
       <div class="mb-4 flex items-center gap-3">
-        <h2 class="text-xl font-extrabold">{{ activeLevel.name }}</h2>
+        <h2 class="text-xl font-extrabold" :lang="language.code">
+          {{ activeLevel.name }}
+        </h2>
         <AppButton
           v-if="editing !== 'new'"
           class="ml-auto"
@@ -156,7 +259,7 @@ function confirmReset() {
           size="sm"
           @click="startAdd"
         >
-          + Add word
+          {{ levelKind === 'kanji' ? t('words.addKanji') : t('words.addWord') }}
         </AppButton>
       </div>
 
@@ -167,32 +270,125 @@ function confirmReset() {
         @submit.prevent="submit"
       >
         <p class="mb-3 font-bold">
-          {{ editing === 'new' ? 'New word' : 'Edit word' }}
+          {{
+            editing === 'new'
+              ? levelKind === 'kanji'
+                ? t('words.newKanji')
+                : t('words.newWord')
+              : levelKind === 'kanji'
+                ? t('words.editKanji')
+                : t('words.editWord')
+          }}
         </p>
 
-        <label class="block">
-          <span class="mb-1 block text-sm font-semibold opacity-70">Word</span>
-          <input
-            v-model="draft.text"
-            type="text"
-            autocapitalize="none"
-            autocomplete="off"
-            class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] text-xl font-bold dark:bg-night"
-            placeholder="the"
-          />
-        </label>
+        <!-- Word card fields -->
+        <template v-if="draft.kind === 'word'">
+          <label class="block">
+            <span class="mb-1 block text-sm font-semibold opacity-70">
+              {{ t('words.fieldWord') }}
+            </span>
+            <input
+              v-model="draft.text"
+              type="text"
+              autocapitalize="none"
+              autocomplete="off"
+              class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] text-xl font-bold dark:bg-night"
+            />
+          </label>
 
-        <label class="mt-3 block">
-          <span class="mb-1 block text-sm font-semibold opacity-70">
-            Sentence using the word
-          </span>
-          <input
-            v-model="draft.sentence"
-            type="text"
-            class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
-            placeholder="The sun is warm."
-          />
-        </label>
+          <label class="mt-3 block">
+            <span class="mb-1 block text-sm font-semibold opacity-70">
+              {{ t('words.fieldSentence') }}
+            </span>
+            <input
+              v-model="draft.sentence"
+              type="text"
+              class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
+            />
+          </label>
+
+          <!-- Optional, and pointless on an English card — offered only where
+               the practice language is not English. -->
+          <template v-if="language.code !== 'en'">
+            <label class="mt-3 block">
+              <span class="mb-1 block text-sm font-semibold opacity-70">
+                {{ t('words.fieldMeaningOptional') }}
+              </span>
+              <input
+                v-model="draft.meaning"
+                type="text"
+                lang="en"
+                class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
+              />
+            </label>
+            <label class="mt-3 block">
+              <span class="mb-1 block text-sm font-semibold opacity-70">
+                {{ t('words.fieldSentenceMeaningOptional') }}
+              </span>
+              <input
+                v-model="draft.sentenceMeaning"
+                type="text"
+                lang="en"
+                class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
+              />
+            </label>
+          </template>
+        </template>
+
+        <!-- Kanji card fields -->
+        <template v-else>
+          <label class="block">
+            <span class="mb-1 block text-sm font-semibold opacity-70">
+              {{ t('words.fieldChar') }}
+            </span>
+            <input
+              v-model="draft.char"
+              type="text"
+              lang="ja"
+              autocomplete="off"
+              class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] text-3xl font-bold dark:bg-night"
+            />
+          </label>
+
+          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold opacity-70">
+                {{ t('words.fieldOn') }}
+              </span>
+              <input
+                v-model="onText"
+                type="text"
+                lang="ja"
+                autocomplete="off"
+                class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
+              />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold opacity-70">
+                {{ t('words.fieldKun') }}
+              </span>
+              <input
+                v-model="kunText"
+                type="text"
+                lang="ja"
+                autocomplete="off"
+                class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
+              />
+            </label>
+          </div>
+
+          <label class="mt-3 block">
+            <span class="mb-1 block text-sm font-semibold opacity-70">
+              {{ t('words.fieldMeaning') }}
+            </span>
+            <input
+              v-model="draft.meaning"
+              type="text"
+              lang="en"
+              class="w-full rounded-2xl bg-white p-3 font-[family-name:var(--font-word)] dark:bg-night"
+            />
+          </label>
+        </template>
 
         <p v-if="formError" class="mt-3 font-bold text-coral" role="alert">
           {{ formError }}
@@ -200,42 +396,47 @@ function confirmReset() {
 
         <div class="mt-4 flex gap-2">
           <AppButton type="submit" variant="success" size="sm">
-            {{ editing === 'new' ? 'Add word' : 'Save changes' }}
+            {{ editing === 'new' ? t('words.submitAdd') : t('words.submitSave') }}
           </AppButton>
-          <AppButton variant="ghost" size="sm" @click="cancelEdit">Cancel</AppButton>
+          <AppButton variant="ghost" size="sm" @click="cancelEdit">
+            {{ t('words.cancel') }}
+          </AppButton>
         </div>
       </form>
 
       <ul class="divide-y divide-ink/10 dark:divide-white/10">
         <li
-          v-for="word in activeLevel.words"
-          :key="word.id"
+          v-for="card in activeLevel.cards"
+          :key="card.id"
           class="flex items-center gap-3 py-3"
         >
           <span class="min-w-0">
             <span
               class="block font-[family-name:var(--font-word)] text-xl font-bold"
+              :lang="card.language"
             >
-              {{ word.text }}
+              {{ cardFace(card) }}
             </span>
-            <span class="block truncate text-sm opacity-60">{{ word.sentence }}</span>
+            <span class="block truncate text-sm opacity-60">
+              {{ cardDetail(card) }}
+            </span>
           </span>
 
           <span class="ml-auto flex shrink-0 gap-2">
             <button
               type="button"
               class="rounded-xl px-3 py-1.5 text-sm font-bold underline opacity-70 hover:opacity-100"
-              @click="startEdit(word.id, word.text, word.sentence)"
+              @click="startEdit(card)"
             >
-              Edit
+              {{ t('words.edit') }}
             </button>
             <button
               type="button"
               class="rounded-xl px-3 py-1.5 text-sm font-bold text-coral underline hover:opacity-80"
-              :aria-label="`Remove ${word.text}`"
-              @click="remove(word.id, word.text)"
+              :aria-label="t('words.removeLabel', { text: cardFace(card) })"
+              @click="remove(card)"
             >
-              Remove
+              {{ t('words.remove') }}
             </button>
           </span>
         </li>
@@ -244,18 +445,15 @@ function confirmReset() {
 
     <!-- File -->
     <section class="deck-card mt-5 p-5">
-      <h2 class="text-xl font-extrabold">Back up or share</h2>
-      <p class="mb-4 text-sm opacity-60">
-        Export saves the whole word list as a JSON file you can keep or move to
-        another device. Import replaces the current list with the one in the file.
-      </p>
+      <h2 class="text-xl font-extrabold">{{ t('words.backupTitle') }}</h2>
+      <p class="mb-4 text-sm opacity-60">{{ t('words.backupBlurb') }}</p>
 
       <div class="flex flex-wrap gap-3">
         <AppButton variant="ghost" size="sm" @click="exportFile">
-          Export JSON
+          {{ t('words.exportJson') }}
         </AppButton>
         <AppButton variant="ghost" size="sm" @click="fileInput?.click()">
-          Import JSON
+          {{ t('words.importJson') }}
         </AppButton>
         <input
           ref="fileInput"
@@ -272,25 +470,25 @@ function confirmReset() {
     </section>
 
     <!-- Reset -->
-    <section v-if="library.isCustomised" class="deck-card mt-5 border-l-8 border-coral p-5">
-      <h2 class="text-xl font-extrabold">Restore the built-in words</h2>
-      <p class="mb-4 text-sm opacity-60">
-        Discards your changes and puts the original word list back. Your child's
-        progress is kept.
-      </p>
+    <section
+      v-if="library.isCustomised"
+      class="deck-card mt-5 border-l-8 border-coral p-5"
+    >
+      <h2 class="text-xl font-extrabold">{{ t('words.restoreTitle') }}</h2>
+      <p class="mb-4 text-sm opacity-60">{{ t('words.restoreBlurb') }}</p>
 
       <div v-if="!confirmingReset">
         <AppButton variant="ghost" size="sm" @click="confirmingReset = true">
-          Restore built-in words
+          {{ t('words.restoreButton') }}
         </AppButton>
       </div>
       <div v-else class="flex flex-wrap items-center gap-3">
-        <span class="font-bold">Discard your word changes?</span>
+        <span class="font-bold">{{ t('words.restoreConfirm') }}</span>
         <AppButton variant="danger" size="sm" @click="confirmReset">
-          Yes, restore
+          {{ t('words.restoreYes') }}
         </AppButton>
         <AppButton variant="ghost" size="sm" @click="confirmingReset = false">
-          Cancel
+          {{ t('words.cancel') }}
         </AppButton>
       </div>
     </section>

@@ -16,11 +16,31 @@ const SWIPE_MAX_VERTICAL_RATIO = 0.8
 const TAP_MAX_DURATION = 500
 const TAP_MAX_MOVEMENT = 12
 
+/**
+ * Gap within which a second tap counts as a double tap.
+ *
+ * The first tap still fires `onTap` immediately rather than waiting to see
+ * whether a second one arrives — holding speech back by a third of a second to
+ * disambiguate would make every single tap feel broken. A double tap therefore
+ * reads as "speak, then toggle", and `onDoubleTap` replaces the second
+ * `onTap` rather than firing alongside it, so the word is never spoken twice.
+ */
+const DOUBLE_TAP_MAX_GAP = 320
+
 export interface SwipeHandlers {
   onSwipeLeft?: () => void
   onSwipeRight?: () => void
   onTap?: () => void
+  onDoubleTap?: () => void
 }
+
+/**
+ * Elements that handle their own taps. A touch starting on one of these is the
+ * control's business, not the surface's — `@click.stop` cannot help here,
+ * because the touch events have already bubbled by the time the click fires,
+ * so a tap on "Show the sentence" would also trigger tap-to-speak.
+ */
+const INTERACTIVE = 'button, a, input, select, textarea, [role="button"]'
 
 export function useSwipe(handlers: SwipeHandlers) {
   const startX = ref(0)
@@ -29,10 +49,17 @@ export function useSwipe(handlers: SwipeHandlers) {
   const tracking = ref(false)
   /** Live horizontal offset, so the card can follow the finger. */
   const dragX = ref(0)
+  /** Timestamp of the previous tap, for double-tap detection. */
+  const lastTapAt = ref(0)
 
   function onTouchStart(event: TouchEvent) {
     // Ignore multi-touch: a pinch or two-finger scroll is not a swipe.
     if (event.touches.length !== 1) {
+      tracking.value = false
+      return
+    }
+    // Let a control have its own tap.
+    if ((event.target as Element | null)?.closest?.(INTERACTIVE)) {
       tracking.value = false
       return
     }
@@ -68,7 +95,19 @@ export function useSwipe(handlers: SwipeHandlers) {
       elapsed < TAP_MAX_DURATION
 
     if (isTap) {
-      handlers.onTap?.()
+      const now = Date.now()
+      const isDoubleTap =
+        Boolean(handlers.onDoubleTap) && now - lastTapAt.value < DOUBLE_TAP_MAX_GAP
+
+      if (isDoubleTap) {
+        // Reset rather than record: a third tap should start a fresh pair, not
+        // toggle again off the back of the second.
+        lastTapAt.value = 0
+        handlers.onDoubleTap?.()
+      } else {
+        lastTapAt.value = now
+        handlers.onTap?.()
+      }
       return
     }
 

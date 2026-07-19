@@ -1,10 +1,12 @@
 import type { LevelId } from '@/types'
 
+/**
+ * A badge's name and description live in the locale files, keyed by id — a
+ * child practising in Filipino should be congratulated in Filipino. What stays
+ * here is the part that is not language: the id, the emoji, and the rule.
+ */
 export interface BadgeDefinition {
   id: string
-  name: string
-  /** Addressed to the child, present tense, no jargon. */
-  description: string
   emoji: string
   test: (stats: BadgeStats) => boolean
 }
@@ -20,114 +22,92 @@ export interface BadgeStats {
   levelSizes: Record<LevelId, number>
 }
 
+/**
+ * Level badges are earned per level number in whichever language is being
+ * practised — finishing Japanese level 1 earns the same badge as finishing
+ * English level 1. Levels a language does not have (Japanese has no level 4)
+ * simply never fire, since their size reads as undefined.
+ */
 function levelComplete(level: LevelId) {
-  return (s: BadgeStats) =>
-    s.levelSizes[level] > 0 && s.masteredByLevel[level] >= s.levelSizes[level]
+  return (s: BadgeStats) => {
+    const size = s.levelSizes[level]
+    return size !== undefined && size > 0 && (s.masteredByLevel[level] ?? 0) >= size
+  }
 }
 
 export const BADGE_DEFINITIONS: BadgeDefinition[] = [
   {
     id: 'first-word',
-    name: 'First Word',
-    description: 'You read your very first word.',
     emoji: '🌱',
     test: (s) => s.totalCorrect >= 1,
   },
   {
     id: 'ten-words',
-    name: 'Ten in the Bag',
-    description: 'You mastered 10 words.',
     emoji: '🎒',
     test: (s) => s.masteredCount >= 10,
   },
   {
     id: 'fifty-words',
-    name: 'Word Collector',
-    description: 'You mastered 50 words.',
     emoji: '📚',
     test: (s) => s.masteredCount >= 50,
   },
   {
     id: 'hundred-words',
-    name: 'Century Reader',
-    description: 'You mastered 100 words.',
     emoji: '🏆',
     test: (s) => s.masteredCount >= 100,
   },
   {
     id: 'streak-3',
-    name: 'Three Days Strong',
-    description: 'You practised 3 days in a row.',
     emoji: '🔥',
     test: (s) => s.longestStreak >= 3,
   },
   {
     id: 'streak-7',
-    name: 'Week Warrior',
-    description: 'You practised 7 days in a row.',
     emoji: '⚡',
     test: (s) => s.longestStreak >= 7,
   },
   {
     id: 'streak-30',
-    name: 'Month of Reading',
-    description: 'You practised 30 days in a row.',
     emoji: '🌟',
     test: (s) => s.longestStreak >= 30,
   },
   {
     id: 'perfect-quiz',
-    name: 'Perfect Score',
-    description: 'You got every quiz question right.',
     emoji: '🎯',
     test: (s) => s.perfectQuizzes >= 1,
   },
   {
     id: 'quiz-master',
-    name: 'Quiz Master',
-    description: 'You aced 10 quizzes.',
     emoji: '🧠',
     test: (s) => s.perfectQuizzes >= 10,
   },
   {
     id: 'daily-5',
-    name: 'Daily Habit',
-    description: 'You finished 5 daily practices.',
     emoji: '📅',
     test: (s) => s.dailyCompletions >= 5,
   },
   {
     id: 'level-1',
-    name: 'First Words Champion',
-    description: 'You mastered every word in First Words.',
     emoji: '🐣',
     test: levelComplete(1),
   },
   {
     id: 'level-2',
-    name: 'Growing Reader Champion',
-    description: 'You mastered every word in Growing Reader.',
     emoji: '🌻',
     test: levelComplete(2),
   },
   {
     id: 'level-3',
-    name: 'Story Time Champion',
-    description: 'You mastered every word in Story Time.',
     emoji: '🦊',
     test: levelComplete(3),
   },
   {
     id: 'level-4',
-    name: 'Confident Reader Champion',
-    description: 'You mastered every word in Confident Reader.',
     emoji: '🚀',
     test: levelComplete(4),
   },
   {
     id: 'level-5',
-    name: 'Word Explorer Champion',
-    description: 'You mastered every word in Word Explorer.',
     emoji: '👑',
     test: levelComplete(5),
   },

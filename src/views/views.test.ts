@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { createRouter, createWebHistory } from 'vue-router'
 import type { Component } from 'vue'
+import { mountView, resetAppState } from '@/test/harness'
 
 import HomeView from './HomeView.vue'
 import LevelView from './LevelView.vue'
@@ -21,35 +19,7 @@ import WordsView from './WordsView.vue'
  * error, which is easy to miss and impossible to use.
  */
 
-function makeRouter() {
-  return createRouter({
-    history: createWebHistory(),
-    routes: [
-      { path: '/', name: 'home', component: { template: '<div/>' } },
-      { path: '/level/:levelId', name: 'level', component: { template: '<div/>' } },
-      { path: '/flashcards/:levelId', name: 'flashcards', component: { template: '<div/>' } },
-      { path: '/practice/:levelId', name: 'practice', component: { template: '<div/>' } },
-      { path: '/quiz/:levelId', name: 'quiz', component: { template: '<div/>' } },
-      { path: '/review', name: 'review', component: { template: '<div/>' } },
-      { path: '/daily', name: 'daily', component: { template: '<div/>' } },
-      { path: '/achievements', name: 'achievements', component: { template: '<div/>' } },
-      { path: '/parent', name: 'parent', component: { template: '<div/>' } },
-      { path: '/parent/words', name: 'words', component: { template: '<div/>' } },
-    ],
-  })
-}
-
-async function mountView(component: Component, props: Record<string, unknown> = {}) {
-  const router = makeRouter()
-  await router.push('/')
-  await router.isReady()
-  return mount(component, { props, global: { plugins: [router] } })
-}
-
-beforeEach(() => {
-  localStorage.clear()
-  setActivePinia(createPinia())
-})
+beforeEach(resetAppState)
 
 const CASES: Array<[name: string, component: Component, props: Record<string, unknown>]> = [
   ['HomeView', HomeView, {}],
@@ -84,7 +54,35 @@ describe('ParentView', () => {
   it('opens straight to the settings with no gate in the way', async () => {
     const wrapper = await mountView(ParentView)
     expect(wrapper.text()).toContain('Parent settings')
-    expect(wrapper.text()).toContain('Available levels')
+    expect(wrapper.text()).toContain('Available levels in English')
     expect(wrapper.text()).not.toContain('PIN')
+  })
+})
+
+describe('every view renders in every language', () => {
+  // A view that only works in English is the failure mode this whole change
+  // exists to prevent, and Japanese exercises the kanji card path that no
+  // other language reaches.
+  const LANGUAGES = ['en', 'fil', 'ja'] as const
+
+  it.each(LANGUAGES)('renders the home and level views in %s', async (code) => {
+    const { useSettingsStore } = await import('@/stores/settings')
+    const settings = useSettingsStore()
+    settings.setLanguage(code)
+    settings.setUiLocale(code)
+
+    for (const [name, component, props] of CASES) {
+      const errors: unknown[] = []
+      const spy = vi.spyOn(console, 'error').mockImplementation((...args) => {
+        errors.push(args)
+      })
+
+      const wrapper = await mountView(component, props, { locale: code })
+
+      expect(errors, `${name} in ${code}`).toEqual([])
+      expect(wrapper.text().trim().length, `${name} in ${code}`).toBeGreaterThan(0)
+
+      spy.mockRestore()
+    }
   })
 })

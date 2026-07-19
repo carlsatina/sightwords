@@ -1,26 +1,50 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useWordsStore } from '@/stores/words'
+import { useI18n } from 'vue-i18n'
+import { useCardsStore } from '@/stores/cards'
 import { useSettingsStore } from '@/stores/settings'
 import { useProgressStore } from '@/stores/progress'
 import { useSpeech } from '@/composables/useSpeech'
 import AppButton from '@/components/AppButton.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
-import type { LevelId } from '@/types'
+import type { Language, LanguageCode, LevelId } from '@/types'
 
-const library = useWordsStore()
+const library = useCardsStore()
 const settings = useSettingsStore()
 const progress = useProgressStore()
-const { voices, supported: speechSupported, speak } = useSpeech()
+const {
+  voices,
+  supported: speechSupported,
+  speak,
+  voicesFor,
+  hasVoiceFor,
+  voiceStatusFor,
+  substituteLangFor,
+} = useSpeech()
+const { t } = useI18n()
 
 const confirmingReset = ref(false)
 
+/** The language whose levels and words this page is currently editing. */
+const active = computed(() => library.language)
+
+/**
+ * Toggling starts from the effective list, not the stored one. Stored is
+ * `undefined` until the parent touches a language, which means "all unlocked";
+ * reading it directly would treat the first click as unlocking from empty and
+ * silently lock every other level.
+ */
 function toggleLevel(id: LevelId) {
-  const current = settings.settings.unlockedLevels
+  const code = active.value.code
+  const current = active.value.levels
+    .map((level) => level.id)
+    .filter((levelId) => settings.isLevelUnlocked(levelId, code))
+
   const next = current.includes(id)
-    ? current.filter((l) => l !== id)
+    ? current.filter((levelId) => levelId !== id)
     : [...current, id]
-  settings.setUnlockedLevels(next)
+
+  settings.setUnlockedLevels(next, code)
 }
 
 function confirmReset() {
@@ -29,62 +53,102 @@ function confirmReset() {
 }
 
 const recentActivity = computed(() =>
-  progress.state.recentAnswers.slice(0, 12).map((answer) => ({
-    ...answer,
-    text: library.getWord(answer.wordId)?.text ?? answer.wordId,
-    when: new Date(answer.at).toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    }),
-  })),
+  progress.state.recentAnswers.slice(0, 12).map((answer) => {
+    const card = library.getCard(answer.cardId)
+    return {
+      ...answer,
+      text: card ? (card.kind === 'kanji' ? card.char : card.text) : answer.cardId,
+      language: card?.language ?? 'en',
+      when: new Date(answer.at).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      }),
+    }
+  }),
 )
 
 /**
- * English voices first, since the words are English and a non-English voice
- * reads them with the wrong phoneme set — but the rest stay selectable rather
- * than hidden, because a bilingual household may well want one.
+ * A sample sentence in each language, so pressing a voice actually
+ * demonstrates that voice rather than reading English at a Japanese engine.
  */
-const groupedVoices = computed(() => {
-  const byName = (a: SpeechSynthesisVoice, b: SpeechSynthesisVoice) =>
-    a.name.localeCompare(b.name)
-  return {
-    english: voices.value.filter((v) => v.lang.startsWith('en')).sort(byName),
-    other: voices.value.filter((v) => !v.lang.startsWith('en')).sort(byName),
-  }
-})
+const VOICE_SAMPLES: Record<LanguageCode, string> = {
+  en: 'The cat is here.',
+  fil: 'Ang pusa ay nandito.',
+  ja: 'ねこがいます。',
+}
 
 /** Picking a voice plays it straight away — you judge a voice by hearing it. */
-function chooseVoice(voiceURI: string) {
-  settings.update('speechVoiceURI', voiceURI || null)
-  speak('The cat is here.')
+function chooseVoice(code: LanguageCode, voiceURI: string) {
+  settings.setVoiceFor(code, voiceURI || null)
+  speak(VOICE_SAMPLES[code], { lang: languageByCode(code)?.speechLang })
+}
+
+function languageByCode(code: LanguageCode): Language | undefined {
+  return library.languages.find((l) => l.code === code)
+}
+
+function sortedVoicesFor(language: Language) {
+  // When a stand-in is doing the reading, the picker has to offer the
+  // stand-in's voices — listing the missing language's (none) would show an
+  // empty dropdown beside audio that demonstrably works.
+  const tags =
+    voiceStatusFor(language.code) === 'substitute'
+      ? (language.fallbackSpeechLangs ?? [])
+      : [language.speechLang]
+
+  const seen = new Set<string>()
+  return tags
+    .flatMap((tag) => voicesFor(tag))
+    .filter((v) => !seen.has(v.voiceURI) && seen.add(v.voiceURI))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** A human name for the language standing in, e.g. "Spanish". */
+function substituteName(code: LanguageCode): string {
+  const tag = substituteLangFor(code)
+  if (!tag) return ''
+  const primary = tag.split('-')[0]
+  try {
+    return new Intl.DisplayNames([settings.settings.uiLocale], { type: 'language' }).of(
+      primary,
+    ) ?? primary
+  } catch {
+    return primary
+  }
 }
 </script>
 
 <template>
   <div class="pt-6">
-    <h1 class="mb-6 text-4xl font-extrabold">Parent settings</h1>
+    <h1 class="mb-6 text-4xl font-extrabold">{{ t('parent.title') }}</h1>
 
     <!-- Overview -->
     <section class="deck-card mb-5 p-5">
-      <h2 class="mb-4 text-xl font-extrabold">Progress</h2>
+      <h2 class="mb-4 text-xl font-extrabold">{{ t('parent.progress') }}</h2>
       <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
-          <p class="text-3xl font-extrabold tabular-nums">{{ progress.masteredCount }}</p>
-          <p class="text-xs font-semibold opacity-55">Words mastered</p>
+          <p class="text-3xl font-extrabold tabular-nums">
+            {{ progress.masteredCount }}
+          </p>
+          <p class="text-xs font-semibold opacity-55">{{ t('parent.statMastered') }}</p>
         </div>
         <div>
           <p class="text-3xl font-extrabold tabular-nums">{{ progress.accuracy }}%</p>
-          <p class="text-xs font-semibold opacity-55">Accuracy</p>
+          <p class="text-xs font-semibold opacity-55">{{ t('parent.statAccuracy') }}</p>
         </div>
         <div>
-          <p class="text-3xl font-extrabold tabular-nums">{{ progress.state.currentStreak }}</p>
-          <p class="text-xs font-semibold opacity-55">Day streak</p>
+          <p class="text-3xl font-extrabold tabular-nums">
+            {{ progress.state.currentStreak }}
+          </p>
+          <p class="text-xs font-semibold opacity-55">{{ t('parent.statStreak') }}</p>
         </div>
         <div>
-          <p class="text-3xl font-extrabold tabular-nums">{{ progress.state.dailyCompletions }}</p>
-          <p class="text-xs font-semibold opacity-55">Dailies finished</p>
+          <p class="text-3xl font-extrabold tabular-nums">
+            {{ progress.state.dailyCompletions }}
+          </p>
+          <p class="text-xs font-semibold opacity-55">{{ t('parent.statDailies') }}</p>
         </div>
       </div>
 
@@ -92,34 +156,89 @@ function chooseVoice(voiceURI: string) {
         <ProgressBar
           v-for="level in library.levels"
           :key="level.id"
-          :value="progress.masteredByLevel[level.id]"
-          :max="level.words.length"
+          :value="progress.masteredByLevel[level.id] ?? 0"
+          :max="level.cards.length"
           :accent="level.accent"
           :label="level.name"
         />
       </div>
     </section>
 
+    <!-- Languages -->
+    <section class="deck-card mb-5 p-5">
+      <h2 class="mb-3 text-xl font-extrabold">{{ t('parent.languageSection') }}</h2>
+
+      <label class="block">
+        <span class="mb-1 block text-sm font-semibold opacity-70">
+          {{ t('parent.practiceLanguage') }}
+        </span>
+        <select
+          class="w-full rounded-2xl bg-ink/5 p-3 font-semibold dark:bg-white/10"
+          :value="settings.settings.language"
+          @change="
+            settings.setLanguage(
+              ($event.target as HTMLSelectElement).value as LanguageCode,
+            )
+          "
+        >
+          <option v-for="l in library.languages" :key="l.code" :value="l.code">
+            {{ l.name }} — {{ l.endonym }}
+          </option>
+        </select>
+        <span class="mt-1 block text-xs opacity-55">
+          {{ t('parent.practiceLanguageBlurb') }}
+        </span>
+      </label>
+
+      <label class="mt-4 block">
+        <span class="mb-1 block text-sm font-semibold opacity-70">
+          {{ t('parent.uiLanguage') }}
+        </span>
+        <select
+          class="w-full rounded-2xl bg-ink/5 p-3 font-semibold dark:bg-white/10"
+          :value="settings.settings.uiLocale"
+          @change="
+            settings.setUiLocale(
+              ($event.target as HTMLSelectElement).value as LanguageCode,
+            )
+          "
+        >
+          <option v-for="l in library.languages" :key="l.code" :value="l.code">
+            {{ l.name }} — {{ l.endonym }}
+          </option>
+        </select>
+        <span class="mt-1 block text-xs opacity-55">
+          {{ t('parent.uiLanguageBlurb') }}
+        </span>
+      </label>
+    </section>
+
     <!-- Words -->
     <section class="deck-card mb-5 p-5">
-      <h2 class="text-xl font-extrabold">Words</h2>
-      <p class="mb-4 text-sm opacity-60">
-        {{ library.allWords.length }} words across {{ library.levels.length }} levels{{
-          library.isCustomised ? ', including your changes' : ''
-        }}. Add your own, edit the built-in ones, or save the list to a file.
+      <h2 class="text-xl font-extrabold">{{ t('parent.wordsSection') }}</h2>
+      <p class="mb-1 text-sm opacity-60">
+        {{
+          t('parent.wordsSummary', {
+            count: library.allCards.length,
+            levels: library.levels.length,
+            language: active.name,
+          })
+        }}
+      </p>
+      <p v-if="library.isCustomised" class="mb-3 text-sm font-semibold opacity-60">
+        {{ t('parent.wordsCustomised') }}
       </p>
       <AppButton variant="quiet" size="sm" :to="{ name: 'words' }">
-        Manage words
+        {{ t('parent.manageWords') }}
       </AppButton>
     </section>
 
     <!-- Levels -->
     <section class="deck-card mb-5 p-5">
-      <h2 class="text-xl font-extrabold">Available levels</h2>
-      <p class="mb-4 text-sm opacity-60">
-        Turn off levels that are too hard for now. Hidden levels don't appear on the
-        home screen or in daily practice.
-      </p>
+      <h2 class="text-xl font-extrabold">
+        {{ t('parent.levelsSection', { language: active.name }) }}
+      </h2>
+      <p class="mb-4 text-sm opacity-60">{{ t('parent.levelsBlurb') }}</p>
       <div class="space-y-2">
         <label
           v-for="level in library.levels"
@@ -129,13 +248,18 @@ function chooseVoice(voiceURI: string) {
           <input
             type="checkbox"
             class="h-6 w-6 accent-[var(--color-grape)]"
-            :checked="settings.isLevelUnlocked(level.id)"
+            :checked="settings.isLevelUnlocked(level.id, active.code)"
             @change="toggleLevel(level.id)"
           />
           <span>
-            <span class="block font-bold">{{ level.name }}</span>
+            <span class="block font-bold" :lang="active.code">{{ level.name }}</span>
             <span class="block text-xs opacity-55">
-              {{ level.ageRange }} · {{ level.words.length }} words
+              {{
+                t('parent.levelMeta', {
+                  ageRange: level.ageRange,
+                  count: level.cards.length,
+                })
+              }}
             </span>
           </span>
         </label>
@@ -144,10 +268,8 @@ function chooseVoice(voiceURI: string) {
 
     <!-- Daily goal -->
     <section class="deck-card mb-5 p-5">
-      <h2 class="text-xl font-extrabold">Daily practice</h2>
-      <p class="mb-4 text-sm opacity-60">
-        How many words appear in a daily session. Changes apply tomorrow.
-      </p>
+      <h2 class="text-xl font-extrabold">{{ t('parent.dailySection') }}</h2>
+      <p class="mb-4 text-sm opacity-60">{{ t('parent.dailyBlurb') }}</p>
       <label class="flex items-center gap-4">
         <input
           type="range"
@@ -156,8 +278,12 @@ function chooseVoice(voiceURI: string) {
           step="1"
           class="w-full accent-[var(--color-grape)]"
           :value="settings.settings.dailyGoal"
+          :aria-label="t('parent.dailySection')"
           @input="
-            settings.update('dailyGoal', Number(($event.target as HTMLInputElement).value))
+            settings.update(
+              'dailyGoal',
+              Number(($event.target as HTMLInputElement).value),
+            )
           "
         />
         <span class="w-16 text-right text-2xl font-extrabold tabular-nums">
@@ -168,10 +294,9 @@ function chooseVoice(voiceURI: string) {
 
     <!-- Speech -->
     <section class="deck-card mb-5 p-5">
-      <h2 class="text-xl font-extrabold">Pronunciation</h2>
+      <h2 class="text-xl font-extrabold">{{ t('parent.speechSection') }}</h2>
       <p v-if="!speechSupported" class="mt-2 text-sm opacity-60">
-        This browser has no speech support, so words can't be read aloud. Everything
-        else works normally.
+        {{ t('parent.speechUnsupported') }}
       </p>
 
       <template v-else>
@@ -187,7 +312,7 @@ function chooseVoice(voiceURI: string) {
               )
             "
           />
-          <span class="font-bold">Read words aloud</span>
+          <span class="font-bold">{{ t('parent.speechEnabled') }}</span>
         </label>
 
         <template v-if="settings.settings.speechEnabled">
@@ -197,21 +322,27 @@ function chooseVoice(voiceURI: string) {
               class="h-6 w-6 accent-[var(--color-grape)]"
               :checked="settings.settings.autoSpeak"
               @change="
-                settings.update('autoSpeak', ($event.target as HTMLInputElement).checked)
+                settings.update(
+                  'autoSpeak',
+                  ($event.target as HTMLInputElement).checked,
+                )
               "
             />
             <span>
-              <span class="block font-bold">Say each word automatically</span>
+              <span class="block font-bold">{{ t('parent.autoSpeak') }}</span>
               <span class="block text-xs opacity-55">
-                Off by default, so the child reads the word before hearing it. The
-                “Hear it” button always works.
+                {{ t('parent.autoSpeakBlurb') }}
               </span>
             </span>
           </label>
 
           <label class="mt-5 block">
             <span class="mb-1 block text-sm font-semibold opacity-70">
-              Speed · {{ settings.settings.speechRate.toFixed(2) }}×
+              {{
+                t('parent.speechRate', {
+                  rate: settings.settings.speechRate.toFixed(2),
+                })
+              }}
             </span>
             <input
               type="range"
@@ -229,55 +360,77 @@ function chooseVoice(voiceURI: string) {
             />
           </label>
 
-          <div class="mt-4">
-            <label class="block">
-              <span class="mb-1 block text-sm font-semibold opacity-70">Voice</span>
+          <!-- One picker per language rather than one global list: the whole
+               point is that each language gets a voice that can read it. -->
+          <div class="mt-5">
+            <h3 class="text-sm font-bold">{{ t('parent.voiceSection') }}</h3>
+            <p class="mt-1 mb-3 text-xs opacity-55">{{ t('parent.voiceBlurb') }}</p>
+
+            <label
+              v-for="l in library.languages"
+              :key="l.code"
+              class="mt-3 block first:mt-0"
+            >
+              <span class="mb-1 block text-sm font-semibold opacity-70">
+                {{ l.name }}
+              </span>
               <select
-                class="w-full rounded-2xl bg-ink/5 p-3 font-semibold dark:bg-white/10"
-                :value="settings.settings.speechVoiceURI ?? ''"
-                :disabled="voices.length === 0"
-                @change="chooseVoice(($event.target as HTMLSelectElement).value)"
+                class="w-full rounded-2xl bg-ink/5 p-3 font-semibold disabled:opacity-50 dark:bg-white/10"
+                :value="settings.voiceFor(l.code) ?? ''"
+                :disabled="!hasVoiceFor(l.speechLang)"
+                @change="
+                  chooseVoice(l.code, ($event.target as HTMLSelectElement).value)
+                "
               >
-                <option value="">Browser default</option>
-                <optgroup v-if="groupedVoices.english.length" label="English">
-                  <option
-                    v-for="voice in groupedVoices.english"
-                    :key="voice.voiceURI"
-                    :value="voice.voiceURI"
-                  >
-                    {{ voice.name }} ({{ voice.lang }})
-                  </option>
-                </optgroup>
-                <optgroup v-if="groupedVoices.other.length" label="Other languages">
-                  <option
-                    v-for="voice in groupedVoices.other"
-                    :key="voice.voiceURI"
-                    :value="voice.voiceURI"
-                  >
-                    {{ voice.name }} ({{ voice.lang }})
-                  </option>
-                </optgroup>
+                <option value="">{{ t('parent.voiceDefault') }}</option>
+                <option
+                  v-for="voice in sortedVoicesFor(l)"
+                  :key="voice.voiceURI"
+                  :value="voice.voiceURI"
+                >
+                  {{ voice.name }} ({{ voice.lang }})
+                </option>
               </select>
+
+              <!-- Named plainly rather than left as an empty dropdown. A
+                   missing Filipino voice is the expected case on most
+                   desktops, and a parent should know both that a stand-in is
+                   reading and where it will be wrong. -->
+              <span
+                v-if="voiceStatusFor(l.code) === 'substitute'"
+                class="mt-1 block text-xs font-semibold text-marigold-deep dark:text-marigold"
+              >
+                {{
+                  t('parent.voiceSubstitute', {
+                    language: l.name,
+                    substitute: substituteName(l.code),
+                  })
+                }}
+              </span>
+              <span
+                v-else-if="!hasVoiceFor(l.speechLang)"
+                class="mt-1 block text-xs font-semibold text-coral-deep dark:text-coral"
+              >
+                {{ t('parent.voiceMissing', { language: l.name }) }}
+              </span>
             </label>
 
-            <!-- Say why the list is empty rather than hiding the control, which
-                 reads as the feature not existing. -->
-            <p v-if="voices.length === 0" class="mt-2 text-xs opacity-55">
-              Still looking for voices on this device. If none appear, this browser
-              only offers its default voice.
+            <p v-if="voices.length === 0" class="mt-3 text-xs opacity-55">
+              {{ t('parent.voiceSearching') }}
             </p>
-            <p v-else class="mt-2 text-xs opacity-55">
-              {{ voices.length }} voices available. Choosing one plays a sample.
+            <p v-else class="mt-3 text-xs opacity-55">
+              {{ t('parent.voiceCount', { count: voices.length }) }}
             </p>
           </div>
 
           <AppButton
+            v-if="hasVoiceFor(active.speechLang)"
             class="mt-4"
             variant="ghost"
             size="sm"
-            @click="speak('The cat is here.')"
+            @click="speak(VOICE_SAMPLES[active.code], { lang: active.speechLang })"
           >
-            Test voice
+            {{ t('parent.testVoice') }}
           </AppButton>
         </template>
       </template>
@@ -285,9 +438,11 @@ function chooseVoice(voiceURI: string) {
 
     <!-- Display -->
     <section class="deck-card mb-5 p-5">
-      <h2 class="mb-3 text-xl font-extrabold">Display</h2>
+      <h2 class="mb-3 text-xl font-extrabold">{{ t('parent.displaySection') }}</h2>
 
-      <span class="mb-1 block text-sm font-semibold opacity-70">Theme</span>
+      <span class="mb-1 block text-sm font-semibold opacity-70">
+        {{ t('parent.theme') }}
+      </span>
       <div class="mb-5 flex gap-2">
         <button
           v-for="mode in (['light', 'dark', 'system'] as const)"
@@ -301,7 +456,13 @@ function chooseVoice(voiceURI: string) {
           "
           @click="settings.setDarkMode(mode)"
         >
-          {{ mode }}
+          {{
+            mode === 'light'
+              ? t('parent.themeLight')
+              : mode === 'dark'
+                ? t('parent.themeDark')
+                : t('parent.themeSystem')
+          }}
         </button>
       </div>
 
@@ -311,10 +472,13 @@ function chooseVoice(voiceURI: string) {
           class="h-6 w-6 accent-[var(--color-grape)]"
           :checked="settings.settings.confettiEnabled"
           @change="
-            settings.update('confettiEnabled', ($event.target as HTMLInputElement).checked)
+            settings.update(
+              'confettiEnabled',
+              ($event.target as HTMLInputElement).checked,
+            )
           "
         />
-        <span class="font-bold">Confetti on milestones</span>
+        <span class="font-bold">{{ t('parent.confetti') }}</span>
       </label>
 
       <label class="mt-3 flex cursor-pointer items-center gap-3">
@@ -330,10 +494,9 @@ function chooseVoice(voiceURI: string) {
           "
         />
         <span>
-          <span class="block font-bold">Show buttons in big word mode</span>
+          <span class="block font-bold">{{ t('parent.focusControls') }}</span>
           <span class="block text-xs opacity-55">
-            Off by default — tap the word to hear it, swipe to move between words.
-            The close button always stays.
+            {{ t('parent.focusControlsBlurb') }}
           </span>
         </span>
       </label>
@@ -344,13 +507,16 @@ function chooseVoice(voiceURI: string) {
           class="h-6 w-6 accent-[var(--color-grape)]"
           :checked="settings.settings.reduceMotion"
           @change="
-            settings.update('reduceMotion', ($event.target as HTMLInputElement).checked)
+            settings.update(
+              'reduceMotion',
+              ($event.target as HTMLInputElement).checked,
+            )
           "
         />
         <span>
-          <span class="block font-bold">Reduce motion</span>
+          <span class="block font-bold">{{ t('parent.reduceMotion') }}</span>
           <span class="block text-xs opacity-55">
-            Turns off animations and confetti.
+            {{ t('parent.reduceMotionBlurb') }}
           </span>
         </span>
       </label>
@@ -358,15 +524,18 @@ function chooseVoice(voiceURI: string) {
 
     <!-- Recent activity -->
     <section v-if="recentActivity.length" class="deck-card mb-5 p-5">
-      <h2 class="mb-3 text-xl font-extrabold">Recent activity</h2>
+      <h2 class="mb-3 text-xl font-extrabold">{{ t('parent.activity') }}</h2>
       <ul class="divide-y divide-ink/10 dark:divide-white/10">
         <li
           v-for="(answer, i) in recentActivity"
-          :key="`${answer.wordId}-${i}`"
+          :key="`${answer.cardId}-${i}`"
           class="flex items-center gap-3 py-2.5"
         >
           <span aria-hidden="true">{{ answer.correct ? '✅' : '🔁' }}</span>
-          <span class="font-[family-name:var(--font-word)] text-lg font-bold">
+          <span
+            class="font-[family-name:var(--font-word)] text-lg font-bold"
+            :lang="answer.language"
+          >
             {{ answer.text }}
           </span>
           <span class="ml-auto text-xs capitalize opacity-50">
@@ -378,24 +547,21 @@ function chooseVoice(voiceURI: string) {
 
     <!-- Reset -->
     <section class="deck-card border-l-8 border-coral p-5">
-      <h2 class="text-xl font-extrabold">Reset progress</h2>
-      <p class="mb-4 text-sm opacity-60">
-        Clears every word score, badge, and streak on this device. This cannot be
-        undone.
-      </p>
+      <h2 class="text-xl font-extrabold">{{ t('parent.resetSection') }}</h2>
+      <p class="mb-4 text-sm opacity-60">{{ t('parent.resetBlurb') }}</p>
 
       <div v-if="!confirmingReset">
         <AppButton variant="ghost" size="sm" @click="confirmingReset = true">
-          Reset all progress
+          {{ t('parent.resetProgress') }}
         </AppButton>
       </div>
       <div v-else class="flex flex-wrap items-center gap-3">
-        <span class="font-bold">Erase everything?</span>
+        <span class="font-bold">{{ t('parent.eraseConfirm') }}</span>
         <AppButton variant="danger" size="sm" @click="confirmReset">
-          Yes, erase it
+          {{ t('parent.eraseYes') }}
         </AppButton>
         <AppButton variant="ghost" size="sm" @click="confirmingReset = false">
-          Cancel
+          {{ t('parent.cancel') }}
         </AppButton>
       </div>
     </section>
